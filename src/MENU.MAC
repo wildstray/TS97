@@ -97,10 +97,16 @@
    ld      R82,#backch
    ld      R81,#pos
    add     R81,#len
+   ld      COUNTCLK,#TIMEOUT
+   call    T0_COUNTER
    loop
    {
       ld      r1,DIGIT
       clr     DIGIT
+      if [r1 != #0]
+      {
+         ld      COUNTCLK,#TIMEOUT
+      }
       if [[r8 >= #pos] && [r8 <= R81]]
       {
 .endm
@@ -147,7 +153,6 @@
    }
 .endm
 ;************************
-
 
 
 

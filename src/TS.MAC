@@ -303,11 +303,11 @@
 .endm
 ;************************
 .macro timeto display,from
-   pushuw  rr0 
    pushuw  rr2 
    pushuw  rr4 
    pushuw  rr6 
-   ldw     rr0,#display
+   pushuw  rr10 
+   ldw     rr10,#display
    ldw     rr2,#from
    ld      r4,#2  
    loop [r4]
@@ -317,18 +317,18 @@
       byte2nibble r5,r7,r6
       bcd2ascii r6,r6
       bcd2ascii r7,r7
-      ld      -(rr0),r6
-      ld      -(rr0),r7
+      ld      -(rr10),r6
+      ld      -(rr10),r7
       if [r4 == #2]
       {               
          ld      r5,#58
-         ld      -(rr0),r5
+         ld      -(rr10),r5
       }
    }
+   popuw   rr10
    popuw   rr6
    popuw   rr4
    popuw   rr2
-   popuw   rr0
 .endm
 ;************************
 

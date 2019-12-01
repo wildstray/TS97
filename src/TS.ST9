@@ -15,10 +15,10 @@
 ;*              * Static data define                                      *
 ;*              * Data section define                                     *
 ;*                                                                        *
-;* VERSION                : 0.9.3B                                        *
+;* VERSION                : 1.0.0B                                        *
 ;*                                                                        *
 ;*                                                                        *
-;* LAST REVISION          : 09/09/97                                      *
+;* LAST REVISION          : 10/11/97                                      *
 ;*                                                                        *
 ;* AUTHOR                 : Andrea Tuccia                                 *
 ;*                                                                        *
@@ -104,6 +104,7 @@ TONEFREE        = 4                 ; Free / waiting for reply
 ;MENUS/KEYPAD DECLARATION
 FORWBACK        = 11
 CONFIRM         = 12
+TIMEOUT         = 4                 ; timeout in seconds for key input
 
 ;E2PROM MEMORY LOCATIONS
 E2_CHECKSUM     = 0
@@ -172,27 +173,9 @@ DIAG_COREFAIL   = 128
 ;******* Bank 8             
 ;**************
 
-
-
 ;**************
-;******* Bank 7                         ; Counters/Flags
+;******* Bank 7                         
 ;**************
-IGNORE  := R127                         ; Ignore current outgoing call
-RING_C  := R126                         ; Ring glitch counter
-RINGS   := R125                         ; Ring counter
-RTCFLAG := R124                         ; RTC installed flag
-COUNTCLK:= R123                         ; Counterclock register
-SWITCH  := R122                         ; Switches status 
-ALARM   := R121                         ; Alarm inputs status
-TONE_C  := R120                         ; Tone glitch counter
-TONE_S  := R119                         ; Tone sampling counter
-DIGIT   := R118                         ; Last dialtone received
-PHONE   := R117                         ; User phone hook status
-LASTNUM := R116                         ; Last number dialed
-DISPFL  := R115                         ; Display updating flag
-RING_T  := R114                         ; Ring counter timeout
-ALSTATE := R113                         ; Alarm/End of alarm type
-EVIDX   := R112                         ; Current event index
 
 
 
@@ -205,18 +188,18 @@ LASTEV  := R110                         ; Puntatore all'ultimo evento
 ;       := R108 
 ;       := R107 
 ;       := R106
-;       := R105 
-USRDGT  := R104                         ; Cifra per fine messaggio/allarme
-PBX     := R103                         ; Ritardo dopo il primo zero per PBX
-DECADIC := R102                         ; Abilita la composizione decadica
-MAXRING := R101                         ; Numero di squilli per rispondere
+PBX     := R105                         ; Ritardo dopo il primo zero per PBX
+DECADIC := R104                         ; Abilita la composizione decadica
+USRDGT  := R103                         ; Cifra per fine messaggio/allarme
+MAXRING := R102                         ; Numero di squilli per rispondere
+MINDIGIT:= R101                         ; Numero minimo di cifre da comporre
 CYCLES  := R100                         ; Ripetizioni del cicli di allarme
 REPT    := R99                          ; Ripetizioni del numero da chiamare
 MAXCONF := R98                          ; Tempo massimo per confermare
-MAXRES  := R97                          ; Tempo max. reset chimate uscenti
+MAXCALL := R97                          ; Tempo massimo chiamata uscente
 PAUSE   := R96                          ; Pausa tra una chiamata e l'altra
 SETUP_BK:= 96                           ; Bank 6 contiene il setup
-MAXPARAMS = 9                           ; Numero di impostazioni utilizzate
+MAXPARAMS = 10                          ; Numero di impostazioni utilizzate
 
 
 ;**************
@@ -289,18 +272,25 @@ temp       :=  r0
 ;       :=RR32
 
 
-
 ;**************
-;******* Bank 1                         ; Free run space
+;******* Bank 1                         ; Counters/Flags
 ;**************
-;       :=RR30                          ; Don't push/pop
-;       :=RR28                          
-;       :=RR26                          
-;       :=RR24
-;       :=RR22
-;       :=RR20
-;       :=RR18
-;       :=RR16
+IGNORE  := R31                          ; Ignore current outgoing call
+RING_C  := R30                          ; Ring glitch counter
+RINGS   := R29                          ; Ring counter
+RTCFLAG := R28                          ; RTC installed flag
+COUNTCLK:= R27                          ; Counterclock register
+SWITCH  := R26                          ; Switches status 
+ALARM   := R25                          ; Alarm inputs status
+TONE_C  := R24                          ; Tone glitch counter
+TONE_S  := R23                          ; Tone sampling counter
+DIGIT   := R22                          ; Last dialtone received
+PHONE   := R21                          ; User phone hook status
+LASTNUM := R20                          ; Last number dialed
+PHONE_C := R19                          ; Phone-hook sample counter
+RING_T  := R18                          ; Ring counter timeout
+ALSTATE := R17                          ; Alarm/End of alarm type
+EVIDX   := R16                          ; Current event index
 
 
 
@@ -594,10 +584,8 @@ idle::
    ldw     rr0,#frame_buffer            ; loads the frame buffer
    ldw     (rr0),#0                     ; zeros the buffer
    ld      ALARM,#0
-   ld      HOOK,#0
+   ld      ALSTATE,#0
    ld      SWITCH,#0
-   ld      RING_C,#0
-   ld      RINGS,#0
 
    backlight off
    led1    off
@@ -607,7 +595,6 @@ idle::
    MC118   off                                 ; powerdown del MC34118
    MC119   off                                 ; powerdown del MC34119
    sleep   #100
-   remote_ei
 
    print   #message_ready
    if [RTCFLAG != #0]
@@ -621,6 +608,11 @@ idle::
       call    clock
    }
    ld      IGNORE,#0
+   ld      RING_C,#0
+   ld      RINGS,#0
+
+   remote_ei
+
 
 main::
    loop {
@@ -633,10 +625,13 @@ main::
          ld       ALSTATE,#ALEXTERNAL
          jx       allarme
       }
-      if [PHONE != #0]
+      if [[PHONE == #1] && [RINGS != #0]]
       {
-         ld       RING_C,#0
-         ld       RINGS,#0
+         ld       IGNORE,#1
+         jx       idle
+      }
+      if [[PHONE == #1] && [RINGS == #0]]
+      {
          ld       ALSTATE,#ALOUTGOING
          jx       outgoing
       }
@@ -647,7 +642,7 @@ main::
          ld       ALSTATE,#ALREMOTE
          jx       allarme
       }
-      if [RINGS >= MAXRING]
+      if [[RINGS >= MAXRING] && [MAXRING > #0]]
       {     
          print    #line2, #message_alring
          ld       ALSTATE,#ALINCOMING
@@ -667,9 +662,9 @@ allarme::                                      ; inizio ciclo di allarme
    print   #line1, #message_alarm
    call    event_begin                         ; registrazione inizio
 
-   if [RINGS >= MAXRING]                       ; se e' una chiamata entrante
-   {
-       ld       RING_C,#0
+   if [[RINGS >= MAXRING] && [MAXRING > #0]]   ; se e' una chiamata entrante
+   {                                           ; e la funzione e' abilitata
+       ld       RING_C,#0                      
        ld       RINGS,#0
        sleep    #1000                          ; attendo fine dello squillo
        relay1   on                             ; poi prendo la linea e
@@ -715,24 +710,7 @@ retry::
    call    event_call                          ; registro il numero chiamato
    ld      LASTNUM,r0                          ; solo alla prima ripetizione
 
-   di                                          ; segnalo cosa sto' facendo
-   print   #msg_evnum
-   blank   line2
-   ldw     rr6,#line2
-   ldw     rr4,#number
-   loop 
-   {
-      ld      r3,(rr4)+
-      bcd2ascii r3,r0
-      ld      (rr6)+,r0
-      if [r3 == #0]
-      {
-         ld      r0,#32
-         ld      -(rr6),r0
-         break
-      }
-   }
-   ei
+   call    number_show                         ; segnalo cosa sto' facendo
 
    sleep   #1000                               ; attendo 1 sec.
 
@@ -775,6 +753,7 @@ retry::
 
    loop {                                      ; lancio il messaggio
     
+;      call    _1420_stop
       call    _1420_reset                      ; reset del 1420
       sleep   #100
 
@@ -785,6 +764,7 @@ retry::
       {                                        
          sleep   #100                          ; durante il quale c'e'
          ifbit SWITCH, #RESET                  ; un reset check
+            call    _1420_stop
             jx       annullamento
          }
          if [DIGIT == USRDGT]                  ; stop se ricevo il tono
@@ -828,17 +808,16 @@ incoming::
    ld      DIGIT,#0
    mute    off                                ; attivazione vivavoce
 
-   loop {                                      ; fino alla ricezione 
-;      if [DIGIT == USRDGT]                    ; di un nuovo tono
-;      {
-;         break
-;
-;      }
-      call    _tone_sample                    ; fino alla rilevazione
-      if [r0 == #TONEBUSY]                    ; del tono di occupato
-      {
+   loop {                                     
+      if [DIGIT == USRDGT]                    ; fino alla ricezione 
+      {                                       ; di un nuovo tono
          break
       }
+  ;    call    _tone_sample                    ; fino alla rilevazione
+  ;    if [r0 == #TONEBUSY]                    ; del tono di occupato
+  ;    {
+  ;       break
+  ;    }
       ifbit SWITCH, #RESET                    ; o al reset manuale
          jx       annullamento
       }
@@ -866,20 +845,54 @@ annullamento::
    jx      idle
 
 outgoing::
-   print   #message_cornetta, #message_alzata
-   ld      COUNTCLK,MAXRES
-   call    T0_COUNTER
+   remote_di
+   print   #message_telefonata, #message_incorso
+   relay1  off                                 ; mi metto in parallelo
+   relay2  on                                  ; al telefono utente 
+   MC118   on                                  ; wakeup del MC34118
+   ld      r0,#11000000b                       ; MT8880 pronto a 
+   call    _8880_ctrl_wr                       ; ricevere i DTMF
+   ld      DIGIT,#0
+   ldw     rr2,#0
+   _8880_ei
+
+   ld      COUNTCLK,MAXCALL                    ; tempo massimo per
+   call    T0_COUNTER                          ; la composizione
    while [COUNTCLK != #0]
    {
-      ifbit SWITCH, #RESET
-         ld    IGNORE,#1
+;      ifbit SWITCH, #RESET
+;         ld    IGNORE,#1
+;         jx    idle
+;      }
+      ld      r2,DIGIT
+      clr     DIGIT
+      if [r2 != #0]                            ; se e' stato composto 
+      {                                        ; un numero
+         inc     r3                            ; incremento un contatore
+      }
+      if [r3 >= MINDIGIT]                      ; se il numero di cifre
+      {                                        ; supera quello programmato
+         ld    IGNORE,#1                       ; esco da questo ciclo
          jx    idle
       }
-      if [PHONE == #0]
-      {
+      if [PHONE == #0]                         ; oppure esco se viene
+      {                                        ; agganciata la cornetta
          jx    idle
       }
    }
+;   loop
+;   {
+;      call    _tone_sample
+;      if [r0 == #TONEBUSY]                    
+;      {
+;         break
+;      }
+;      if [PHONE == #0]
+;      {
+;         jx    idle
+;      }
+;   }
+
    print   #line2, #message_alout
    relay1  on
    relay2  on
@@ -990,7 +1003,8 @@ menu_remote::
                      sleep   #2000
                   }
       }
-      .action #1
+      if [[r2 == #1] && [[r1 == #10] || [r1 == #1]]]
+      {
                      call    remote_enter
       }
       .action #2
@@ -1048,14 +1062,28 @@ menu_numbers::
       .action  #8
          break
       }
+      if [[r1 != #FORWBACK] && [r1 != #0]]
+      {
+         call    number_enter
+      }
       if [r1 == #CONFIRM]
       {
+         ld      (number),#0
+         call    number_write
          call    number_enter
       }
       if [[r2 < #8] && [r2 != r0]]
       {
          ld      r0,r2
          call    number_read
+         di
+         print   #line1, #numeri_begin
+         ldw     rr6,#line1+11
+         ld      r9,r0
+         inc     r9
+         bcd2ascii r9,r9
+         ld      (rr6),r9
+         ei
          call    number_show
       }
    .endmenu
@@ -1068,21 +1096,21 @@ menu_setup::
    pushu   r1
    pushu   r2
    .menu #MAXPARAMS
-      .display #0, sub_T0_1,,         setup_view
-      .display #1, sub_T1_1,,         setup_view
-      .display #2, sub_T2_1,,         setup_view
-      .display #3, sub_C0_1,,         setup_view
-      .display #4, sub_C1_1,,         setup_view
-      .display #5, sub_C2_1,,         setup_view
-      .display #6, sub_selection1,,   setup_view
-      .display #7, sub_pbx1,,         setup_view
-      .display #8, sub_usrdgt1,,      setup_view
+      .display #0, sub_T0_1,,    setup_view
+      .display #1, sub_T1_1,,    setup_view
+      .display #2, sub_T2_1,,    setup_view
+      .display #3, sub_C0_1,,    setup_view
+      .display #4, sub_C1_1,,    setup_view
+      .display #5, sub_C2_1,,    setup_view
+      .display #6, sub_C3_1,,    setup_view
+      .display #7, sub_C4_1,,    setup_view
+      .display #8, sub_F0_1,,    setup_view
+      .display #9, sub_F1_1,,    setup_view
       .display #MAXPARAMS, menu_preced1,      menu_preced2
       .action #MAXPARAMS
                  break
       }
-;      if [[r1 == #CONFIRM] && [r2 < #MAXPARAMS] && [r2 != r0]]
-      if [[r1 == #CONFIRM] && [r2 < #MAXPARAMS]]
+      if [[r1 != #FORWBACK] && [r1 != #0] && [r2 < #MAXPARAMS]]
       {
          call    setup_enter
       }
@@ -1099,11 +1127,13 @@ menu_clock::
       .display #0, sub_time1,,        clock
       .display #1, sub_date1,,        date
       .display #2, menu_preced1,      menu_preced2
-      .action #0
-                  call time_enter
+      if [[r2 == #0] && [r1 != #0] && [[r1 <= #2] || [r1 == #10]]]
+      {
+         call    time_enter
       }
-      .action #1
-                  call date_enter
+      if [[r2 == #1] && [r1 != #0] && [[r1 <= #3] || [r1 == #10]]]
+      {
+         call    date_enter
       }
       .action #2
                   break
@@ -1158,13 +1188,13 @@ menu_events::
 _T0_int_0::
    push  PPR
    ;***********************                
-   spp     #T0D_PG                         ; Enable Timer0 page
+   spp     #T0D_PG                         ; Set Timer0 page
    and     T_FLAGR,#~(ouf | cp0 | cp1)     ; Clear Overflow/Underflow/Capture
    ;***********************
-   dec     COUNTCLK                        ; When counter zeroes stop
-   if [COUNTCLK == #0]
+   dec     COUNTCLK                        ; Decrement the counter
+   if [COUNTCLK == #0]                     ; and when zero stop the timer
    {
-      and      T_TCR,#~cen                 ; Stop Timer0
+      and      T_TCR,#~cen                 ; Reset Counter Enable
    } 
    ;***********************
    pop   PPR
@@ -1255,7 +1285,7 @@ _WD_int::
    }
    ;***********************
    ifnobit   P5DR,#RING                    ; poll ring detector or
-      if [RING_C < #18]
+      if [RING_C < #17]   
       {
          inc     RING_C                    ; check for signal every 50ms
       } else {
@@ -1271,14 +1301,14 @@ _WD_int::
          ld      RING_C,#0
          ld      RING_T,#0
       }
-       if [RING_C == #0]
-       {
-          ifbit   P3DR,#HOOK               ; phone hook status
-             ld      PHONE,#1
-          } else {
-             ld      PHONE,#0
-          }
-       }
+;      if [RING_C == #0]
+;      {
+         ifbit   P3DR,#HOOK               ; phone hook status
+            ld      PHONE,#1
+         } else {
+            ld      PHONE,#0
+         }
+;      }
    }
    ;***********************
    if [TONE_S < #MAXTONE]                  ; poll line-tone input to
@@ -1492,10 +1522,6 @@ display_bufclr::
 	ret
 
 display_update:
-;   pushuw  rr0
-;   pushuw  rr2
-;   pushuw  rr8
-;   pushuw  rr10
 	;***********************
 	call    _display_ready
    ld      P0D,#01001111b                    ; scrittura istruzioni
@@ -1523,10 +1549,6 @@ display_update:
 		ld      r0,(rr8)+
 		call    _display_write
 	}
-;   popuw   rr10
-;   popuw   rr8
-;   popuw   rr2
-;   popuw   rr0
 	;*********************** 
 	ret
 
@@ -2011,6 +2033,9 @@ _i2c_transfer::
          add     r0,#E2_PGSIZE
          ld      SLAVE_ADDR,r0
       }
+      ifbit SLAVE_STAT, #NO_ACK               ; check for slave acknoledge
+         break
+      }
       delay   #2300                           ; 5ms delay
 
    } while [LENGHT != #0]
@@ -2203,10 +2228,10 @@ rtc_check::
       ld   (i2c_buffer+7),#0xE0
       I2C WRITE,RTC_SLAVE,#0,#8
    }
-;   if [[RTCFLAG == #1] && [(i2c_buffer+7) != #0xE0]]
-;   {
-;      or      r0,#DIAG_RTCFAIL
-;   } 
+   if [[RTCFLAG == #1] && [(i2c_buffer+7) != #0xE0]]
+   {
+      or      r0,#DIAG_RTCFAIL
+   } 
    ret
 
 
@@ -2226,14 +2251,15 @@ defaults::
    }
    ld      EVENTS,  #0
    ld      LASTEV,  #0
-   ld      USRDGT,  #10
    ld      PBX,     #0
    ld      DECADIC, #0
-   ld      MAXRING, #9
+   ld      USRDGT,  #10
+   ld      MAXRING, #10
+   ld      MINDIGIT,#1
    ld      CYCLES,  #2
    ld      REPT,    #5
    ld      MAXCONF, #60
-   ld      MAXRES,  #60
+   ld      MAXCALL, #60
    ld      PAUSE,   #60
    ret
 
@@ -2436,10 +2462,10 @@ rtc_start::
 
 
 number_read::
-   pushu   r1
+   pushuw  rr0
    pushuw  rr2
    pushuw  rr4
-   pushuw  rr12
+   pushuw  rr6
    zero    number,#16
    ldw     rr2,#8
    mul     rr2,r0
@@ -2447,12 +2473,12 @@ number_read::
    I2C READ, E2_SLAVE, rr2, #8
    if [(i2c_buffer) != #0]
    {
-     ldw     rr12,#0
+     ldw     rr6,#0
      ldw     rr4,#0
      loop 
      {
-        ld      r3,i2c_buffer(rr12)
-        incw    rr12
+        ld      r3,i2c_buffer(rr6)
+        incw    rr6
         byte2nibble r3,r1,r2
         ld      number(rr4),r1
         incw    rr4
@@ -2464,16 +2490,16 @@ number_read::
         }
      }
    }
-   popuw   rr12
+   popuw   rr6
    popuw   rr4
    popuw   rr2
-   popu    r1
+   popuw   rr0
    ret
 
 
 number_write::
-   pushu   r1
-   pushu   r2
+   pushuw  rr0
+   pushuw  rr2
    ldw     rr6,#0
    ldw     rr4,#0
    loop
@@ -2494,46 +2520,42 @@ number_write::
    mul     rr2,r0
    addw    rr2,#E2_NUMERS
    I2C WRITE, E2_SLAVE, rr2, #8
-   popu    r2
-   popu    r1
+   popuw   rr2
+   popuw   rr0
    ret
 
 
 number_show::
    pushuw  rr0
-   call    display_bufclr
-   print   #line1, #numeri_begin
-   ldw     rr4,#15
-   loopw [rr4] {
-      ld      r1,line1(rr4)
-      if [r1 == #23h]
-      {
-         ld    r1,r0
-         inc   r1
-         bcd2ascii r1,r1
-         ld    line1(rr4),r1
-      }
-   }
+   pushuw  rr4
+   pushuw  rr6
+   di
+   blank   line2
    ldw     rr6,#line2
-   ldw     rr10,#number
+   ldw     rr4,#number
    loop 
    {
-      ld      r1,(rr10)+
-      bcd2ascii r1,r9
-      ld      (rr6)+,r9
-      if [r1 == #0]
+      ld      r0,(rr4)+
+      bcd2ascii r0,r1
+      ld      (rr6)+,r1
+      if [r0 == #0]
       {
-         ld      r9,#32
-         ld      -(rr6),r9
+         ld      r1,#32
+         ld      -(rr6),r1
          break
       }
    }
+   ei
+   popuw   rr6
+   popuw   rr4
    popuw   rr0
    ret
 
 
 number_enter::
    pushuw  rr0
+   pushuw  rr2
+   ld      r14,r1
    call    number_read
    call    display_bufclr
    print   #line1, #numeri_begin
@@ -2566,9 +2588,14 @@ number_enter::
       ld      r1,#95
       ld      (rr6),r1
    }
+   if [r14 != #CONFIRM]
+   {
+      ld      DIGIT,r14
+   }
    .input 0,16,32
    .endinput
    call    number_write
+   popuw   rr2
    popuw   rr0
    ret
 
@@ -2583,16 +2610,15 @@ time_enter::
    loop [r3] {
       ld      r0,(rr4)
       incw    rr4
-      byte2nibble r0,r2,r1
-      ld      -(rr10),r1
-      ld      -(rr10),r2
+      byte2nibble r0,r7,r6
+      ld      -(rr10),r6
+      ld      -(rr10),r7
    }
    ldw     rr6,#line2
    ldw     rr10,#time_buffer
    ld      r8,#4
    addw    rr6,#4
-   ld      r9,#95
-   ld      (rr6),r9
+   ld      DIGIT,r1
    .input  4,8,48
       .maxval   4,2
       .maxval   5,3,2
@@ -2631,16 +2657,15 @@ date_enter::
    loop [r3] {
       ld      r0,(rr4)
       decw    rr4
-      byte2nibble r0,r2,r1
-      ld      -(rr10),r1
-      ld      -(rr10),r2
+      byte2nibble r0,r7,r6
+      ld      -(rr10),r6
+      ld      -(rr10),r7
    }
    ldw     rr6,#line2
    ldw     rr10,#date_buffer
    ld      r8,#4
    addw    rr6,#4
-   ld      r9,#95
-   ld      (rr6),r9
+   ld      DIGIT,r1
    .input  4,8,48
       .maxval   4,3
       .minval   5,1,0
@@ -2682,6 +2707,7 @@ remote_enter::
    addw    rr6,#2
    ld      r9,#95
    ld      (rr6),r9
+   ld      DIGIT,r1
    .input  2,12,48
       .maxval   2,1
       .maxval   3,1
@@ -2723,20 +2749,40 @@ remote_enter::
 setup_view::
    pushuw  rr0
    pushu   r2
+   di
    ld      r4,#SETUP_BK
    add     r4,r2
-   di
+   switch [r2]
+   {
+      case #0:
+                  print   #line2, #sub_T0_2
+      case #1:
+                  print   #line2, #sub_T1_2
+      case #2:
+                  print   #line2, #sub_T2_2
+      case #3:
+                  print   #line2, #sub_C0_2
+      case #4:
+                  print   #line2, #sub_C1_2
+      case #5:
+                  print   #line2, #sub_C2_2
+      case #6:
+                  print   #line2, #sub_C3_2
+      case #7:
+                  print   #line2, #sub_C4_2
+      case #8:
+                  print   #line2, #sub_F0_2
+      case #9:
+                  print   #line2, #sub_F1_2
+   }
    switch [r2]
    {
       case #0:
       case #1:
       case #2:
-               print   #line2, #sub_times_2
-               ldw     rr10,#tempinput
-               ldw     rr6,#line2+3
+               ldw     rr6,#line2+14
                ld      r3,(r4)
 
-;               byte2nibble r3,r2,r1
                byte2bcd r3,r2,r1
 
                ld      (rr10)+,r2
@@ -2747,34 +2793,49 @@ setup_view::
                ld      (rr6),r1
       case #3:
       case #4:
-               print   #line2, #sub_turns_2
-               ldw     rr10,#tempinput
-               ldw     rr6,#line2+4
+               ldw     rr6,#line2+15
                ld      r1,(r4)
                bcd2ascii r1,r1
                ld      (rr6),r1
       case #5:
-               print   #line2, #sub_C2_2
-               ldw     rr10,#tempinput
-               ldw     rr6,#line2+4
+               ldw     rr6,#line2+15
                ld      r1,(r4)
                bcd2ascii r1,r1
                ld      (rr6),r1
       case #6:
+               ldw     rr6,#line2+14
+               ld      r3,(r4)
+
+               byte2bcd r3,r2,r1
+
+               ld      (rr10)+,r2
+               ld      (rr10),r1
+               if [r2 != #0]
+               {
+                  bcd2ascii r2,r2
+               } else {
+                  ld      r2,#32
+               }
+               bcd2ascii r1,r1
+               ld      (rr6)+,r2
+               ld      (rr6),r1
       case #7:
-               print   #line2, #sub_yesno2
-               ldw     rr10,#tempinput
-               ldw     rr6,#line2+7
+               ldw     rr6,#line2+15
                ld      r1,(r4)
                bcd2ascii r1,r1
                ld      (rr6),r1
       case #8:
-               print   #line2, #sub_usrdgt2
-               ldw     rr10,#tempinput
-               ldw     rr6,#line2+13
+      case #9:
+               ldw     rr6,#line2+14
                ld      r1,(r4)
-               bcd2ascii r1,r1
-               ld      (rr6),r1
+               if [r1 == #0]
+               {
+                  ldw     rr0, #message_no
+               } else {
+                  ldw     rr0, #message_yes
+               }
+               lddp (rr6)+,(rr0)+
+               lddp (rr6)+,(rr0)+
    }
    ei
    popu    r2
@@ -2792,87 +2853,109 @@ setup_enter::
       case #0:
       case #1:
       case #2:
-               ldw     rr10,#tempinput
-               ldw     rr6,#line2+3
-               ld      r3,(r4)
-;               byte2nibble r3,r2,r1
-               byte2bcd r3,r2,r1
-               ld      (rr10)+,r2
-               ld      (rr10),r1
-               bcd2ascii r2,r2
-               bcd2ascii r1,r1
-               ld      (rr6)+,r2
-               ld      (rr6),r1
-               ldw     rr10,#tempinput
-               ldw     rr6,#line2+3
-               ld      r8,#3
-               ld      r9,#95
-               ld      (rr6),r9
-               .input  3,2,32
-                  .minval 3,1
-               .endinput
-               ldw     rr10,#tempinput
-               ld      r2,(rr10)+
-               ld      r1,(rr10)
                dtmf2bcd r1,r1
-               dtmf2bcd r2,r2
-;               nibble2byte r2,r1,r3
-               bcd2byte r2,r1,r3
-               ld      (r4),r3
+               if [[r1 >= #1] && [r1 != #CONFIRM]]
+               {
+                  ldw     rr6,#line2+14
+                  bcd2ascii r1,r2
+                  ld      (rr6),r2
+
+                  incw    rr6
+                  ld      r9,#95
+                  ld      (rr6),r9
+
+                  ld      COUNTCLK,#TIMEOUT
+                  call    T0_COUNTER
+                  while [[DIGIT == #0] || [DIGIT == #CONFIRM] || [DIGIT == #FORWBACK]]
+                  {
+                      if [COUNTCLK == #0]
+                      {
+                         break
+                      }
+                  }
+                  ld      r2,DIGIT
+                  clr     DIGIT
+
+                  bcd2ascii r2,r3
+                  ld      (rr6),r3
+
+                  dtmf2bcd r1,r1
+                  dtmf2bcd r2,r2
+                  bcd2byte r1,r2,r3
+                  ld      (r4),r3
+               }
       case #3:
       case #4:
       case #5:
-               ldw     rr10,#tempinput
-               ldw     rr6,#line2+4
-               ld      r1,(r4)
-               bcd2ascii r1,r1
-               ld      (rr6),r1
-               ldw     rr10,#tempinput
-               ldw     rr6,#line2+4
-               ld      r8,#4
-               ld      r9,#95
-               ld      (rr6),r9
-               .input  4,1,32
-                  .minval 4,1
-               .endinput
-               ldw     rr10,#tempinput
-               ld      r1,(rr10)
                dtmf2bcd r1,r1
-               ld      (r4),r1
+               if [[r1 >= #1] && [r1 != #CONFIRM]]
+               {
+                  ld      (r4),r1
+                  bcd2ascii r1,r1
+                  ldw     rr6,#line2+15
+                  ld      (rr6),r1
+               }
       case #6:
-      case #7:
-               ldw     rr10,#tempinput
-               ldw     rr6,#line2+7
-               ld      r1,(r4)
-               bcd2ascii r1,r1
-               ld      (rr6),r1
-               ldw     rr10,#tempinput
-               ldw     rr6,#line2+7
-               ld      r8,#7
-               ld      r9,#95
-               ld      (rr6),r9
-               .input  7,1,32
-                  .maxval 7,1
-               .endinput
-               ldw     rr10,#tempinput
-               ld      r1,(rr10)
                dtmf2bcd r1,r1
-               ld      (r4),r1
+               if [[r1 >= #0] && [r1 != #CONFIRM]]
+               {
+                  ldw     rr6,#line2+14
+                  bcd2ascii r1,r2
+                  ld      (rr6),r2
+                  incw    rr6
+                  ld      r9,#95
+                  ld      (rr6),r9
+
+                  ld      COUNTCLK,#TIMEOUT
+                  call    T0_COUNTER
+                  while [[DIGIT == #0] || [DIGIT == #CONFIRM] || [DIGIT == #FORWBACK]]
+                  {
+                      if [COUNTCLK == #0]
+                      {
+                         break
+                      }
+                  }
+                  ld      r2,DIGIT
+                  clr     DIGIT
+                  if [r2 != #0]
+                  {
+                     bcd2ascii r2,r3
+                     ld      (rr6),r3
+                  } else {
+                     bcd2ascii r1,r3
+                     ld      (rr6),r3
+                     decw    rr6
+                     ld      r3,#32
+                     ld      (rr6),r3
+                     ld      r2,r1
+                     ld      r1,#0
+                  }
+                  dtmf2bcd r1,r1
+                  dtmf2bcd r2,r2
+                  bcd2byte r1,r2,r3
+                  ld      (r4),r3
+               }
+      case #7:
+               if [r1 != #CONFIRM]
+               {
+                  ld      (r4),r1
+                  bcd2ascii r1,r1
+                  ldw     rr6,#line2+15
+                  ld      (rr6),r1
+               }
       case #8:
-               ldw     rr10,#tempinput
-               ldw     rr6,#line2+13
-               ld      r1,(r4)
-               bcd2ascii r1,r1
-               ld      (rr6),r1
-               ldw     rr10,#tempinput
-               ldw     rr6,#line2+13
-               ld      r8,#13
-               ld      r9,#95
-               ld      (rr6),r9
-               .input  13,1,32
-               .endinput
-               ldw     rr10,#tempinput
-               ld      (r4)+,(rr10)+
+      case #9:
+               if [r1 == #CONFIRM]
+               {
+                  ld      r1,(r4)
+                  if [r1 == #0]
+                  {
+                     ld      r1,#1
+                  } else {
+                     ld      r1,#0
+                  }
+                  ld      (r4),r1
+               }
    }
    call    save_setup
    popu    r2
@@ -2993,6 +3076,7 @@ event_view::
          }
          print  #line2,rr6
       }
+      ld      r14,(i2c_buffer+4)
       if [[r0 == #EVCALL] && [r2 > #0]]
       {
          pushu   r2
@@ -3001,28 +3085,12 @@ event_view::
             {
                print   #line1,#msg_evnum
                pushu   r0
-               ld      r0,(i2c_buffer+4)
+               ld      r0,r14
                call    number_read
                popu    r0
-               di
-               blank   line2
-               ldw     rr6,#line2
-               ldw     rr4,#number
-               loop 
-               {
-                  ld      r3,(rr4)+
-                  bcd2ascii r3,r12
-                  ld      (rr6)+,r12
-                  if [r3 == #0]
-                  {
-                     ld      r12,#32
-                     ld      -(rr6),r12
-                     break
-                  }
-               }
-               ei
+               call    number_show
             }
-            if [r2 == #1]
+            if [[r2 == #1] && [r1 == #FORWBACK]]
             {
                I2C READ,E2_SLAVE,rr10,#10
                di
@@ -3252,6 +3320,7 @@ event_end::
 ;********************** Funzioni relative ai munu *************************
 ;**************************************************************************
 
+
 _endinput::
          if [[r1 != #0] && [r1 <= #10] && [r8 < R81]]
          {
@@ -3291,13 +3360,14 @@ _endinput::
             dec     r8
             clr     r1
          }
-         if [[r1 == #CONFIRM] && [r8 == R81]]
+;         if [[r1 == #CONFIRM] && [r8 == R81]]
+         if [r8 == R81]
          {
             ld      r9,#32
             ld      (rr6),r9
             ld      r1,#0xFF         ; do a forward break
          }
-         if [r1 == #CONFIRM]
+         if [[r1 == #CONFIRM] || [COUNTCLK == #0]]
          {
             ld      R82,(rr10)
             if [R82 == #0]
@@ -3524,20 +3594,38 @@ sub_time2:              .ascii  "    ##:##:##    "
 sub_date1:              .ascii  "  Cambio DATA: ~"
 sub_date2:              .ascii  "   ##/##/####   " 
 
-sub_T0_1:               .ascii  "Pausa tra telef:" 
-sub_T1_1:               .ascii  "Tempo max reset:" 
-sub_T2_1:               .ascii  "Tempo conferma: " 
-sub_times_2:            .ascii  "   ## secondi   "
-sub_C0_1:               .ascii  "Ripetiz. numeri:" 
-sub_turns_2:            .ascii  "    # volte     "  
-sub_C1_1:               .ascii  "Ripetiz. ciclo: " 
-sub_C2_1:               .ascii  "Risposta dopo:  " 
-sub_C2_2:               .ascii  "    # squilli   "  
-sub_selection1:         .ascii  "Selez. decadica:"
-sub_yesno2:             .ascii  "       #        "
-sub_pbx1:               .ascii  "Collegato a PBX:"
-sub_usrdgt1:            .ascii  "Fine allarme    "
-sub_usrdgt2:            .ascii  "con numero:  #  "
+sub_T0_1:               .ascii  "Pausa tra le    "
+sub_T0_2:               .ascii  "telefonate:   ##"
+
+sub_T1_1:               .ascii  "Tempo massimo   "
+sub_T1_2:               .ascii  "per chiamata: ##"
+
+sub_T2_1:               .ascii  "Tempo massimo   "
+sub_T2_2:               .ascii  "per reset:    ##"
+
+sub_C0_1:               .ascii  "Ripetizione dei "
+sub_C0_2:               .ascii  "numeri:        #"
+
+sub_C1_1:               .ascii  "Ripetizione del "
+sub_C1_2:               .ascii  "ciclo allarme: #"
+
+sub_C2_1:               .ascii  "Numero minimo di"
+sub_C2_2:               .ascii  "cifre:         #"
+
+sub_C3_1:               .ascii  "Numero squilli  "
+sub_C3_2:               .ascii  "per risposta: ##"
+
+sub_C4_1:               .ascii  "Fine allarme con"
+sub_C4_2:               .ascii  "numero:        #"
+
+sub_F0_1:               .ascii  "Selezione telef."
+sub_F0_2:               .ascii  "decadica:     ##"
+
+sub_F1_1:               .ascii  "Ritardo dopo 0  "
+sub_F1_2:               .ascii  "per PBX:      ##"
+
+message_yes:            .ascii  "SI"
+message_no:             .ascii  "NO"
 
 sub_tempi1:             .ascii  "    Tempi     ~"
 sub_tempi2:             .ascii  " *             "
@@ -3548,9 +3636,8 @@ numeri_absent:          .ascii  "Non programmato."
 menu_preced1:           .ascii  "   Ritorna al   "
 menu_preced2:           .ascii  "menu precedente."
 
-message_cornetta:       .ascii  "Cornetta telef. "
-message_abbassata:      .ascii  "   ABBASSATA    "
-message_alzata:         .ascii  "     ALZATA     "
+message_telefonata:     .ascii  "   Telefonata   "
+message_incorso:        .ascii  "utente in corso."
 
 malvenuto:              .ascii  "Guarda i numeri:"
 telesoccorso:           .ascii  "Il telesoccorso:"
@@ -3612,9 +3699,7 @@ remote_buffer::         .blkb   2               ; format: 0xxxxxx00xxxxxx0
 
 number::                .blkb   20              ; current telefonic number
 
-                        .blkb   2
 i2c_buffer::            .blkb   16              ; buffer for i2c bus
-                        .blkb   2
 
 rtc_buffer::            .blkb   8               ; rtc time/date buffer
 
@@ -3622,8 +3707,8 @@ time_buffer::           .blkb   6               ; entered time (bcd)
 date_buffer::           .blkb   8               ; entered date (bcd)
 remcode_buffer::        .blkb   12              ; remote code buffer (bcd)
 
+tempinput::             .blkb   64              ; temporary input datas
+
 display_buffer::
 line1::                 .blkb   16              ; display buffer of 32 char
 line2::                 .blkb   16
-
-tempinput::             .blkb   16              ; temporary input datas
