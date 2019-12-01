@@ -119,14 +119,27 @@
 .endm
 ;************************
 .macro   remote_di       
+   .ifc df EMU
    and   EIPR,#~ipd1m
-   and   EIMR,#~id1m 
+   and   EIMR,#~id1m
+   .endc
+   .ifc ndf EMU
+   and   EIPR,#~ipb1m
+   and   EIMR,#~ib1m
+   .endc
 .endm
 ;************************
 .macro   remote_ei
+   .ifc df EMU
    and   EIPR,#~ipd1m  
 	nop
    or    EIMR,#id1m    
+   .endc
+   .ifc ndf EMU
+   and   EIPR,#~ipb1m  
+	nop
+   or    EIMR,#ib1m    
+   .endc
 .endm
 ;************************
 .macro   _8880_di       
@@ -159,29 +172,35 @@
 .endm
 ;************************
 .macro   led1 status
+   .ifc ndf EMU
    .ifc eq status
       and     P2DR,#~LED1
    .endc
    .ifc ne status
       or      P2DR,#LED1
    .endc
+   .endc
 .endm
 ;************************
 .macro   led2 status
+   .ifc ndf EMU
    .ifc eq status
       and     P2DR,#~LED2
    .endc
    .ifc ne status
       or      P2DR,#LED2
    .endc
+   .endc
 .endm
 ;************************
 .macro   backlight status
+   .ifc ndf EMU
    .ifc eq status
       and     P2DR,#~BACKLIGHT
    .endc
    .ifc ne status
       or      P2DR,#BACKLIGHT
+   .endc
    .endc
 .endm
 ;************************

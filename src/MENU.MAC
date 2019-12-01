@@ -29,7 +29,7 @@
 .macro  print  where,msg1,msg2
    pushuw  rr0
    pushuw  rr2
-   pushuw  rr4
+   pushu   r4
    ldw     rr0,#where
    ldw     rr2,msg1
    ld      r4,#16
@@ -43,7 +43,7 @@
       lddp (rr0)+,(rr2)+
    }
    .endc
-   popuw   rr4
+   popu    r4
    popuw   rr2
    popuw   rr0
 .endm
