@@ -281,6 +281,26 @@
    popuw   rr14
 .endm
 ;************************
+.macro byte2hex byte,asciih,asciil
+   ld      asciil,byte
+   and     asciil,#0Fh
+   ld      asciih,byte
+   and     asciih,#0F0h
+   swap    asciih
+   if [asciil < #10]
+   {
+      add     asciil,#48
+   } else {
+      add     asciil,#55
+   }
+   if [asciih < #10]
+   {
+      add     asciih,#48
+   } else {
+      add     asciih,#55
+   }
+.endm
+;************************
 
 
 

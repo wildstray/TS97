@@ -94,30 +94,42 @@ SLAVE_READY  == 0x80                ; Slave is ready for a new operation...
 
 
 ;DTMF/LINETONE DEFINES
-TONEHIZ         = 0
-TONEDIAL        = 1
-TONEPBX         = 2
-TONEBUSY        = 3
-TONEFREE        = 4
-ZERO            = 10
+MAXTONE         = 36                ; Max line tone samples (every 50 ms)
+TONEHIZ         = 0                 ; High impedence / silence 
+TONEDIAL        = 1                 ; Italian dialtone
+TONEPBX         = 2                 ; PBX / interational dialtone
+TONEBUSY        = 3                 ; Busy tone
+TONEFREE        = 4                 ; Free / waiting for replay
 
 ;MENUS/KEYPAD DECLARATION
 FORWBACK        = 11
 CONFIRM         = 12
 
-
 ;E2PROM MEMORY LOCATIONS
+;E2_CHECKSUM     = 0
+;E2_SERIAL       = 2
+;E2_SETUP        = 16
+;E2_REMOTE       = 64
+;E2_NUMERS       = 480
+;E2_EVENTS       = 608
+;E2_SIZE         = 2048
 E2_CHECKSUM     = 0
 E2_SERIAL       = 2
 E2_SETUP        = 16
-E2_REMOTE       = 64
-E2_NUMERS       = 480
-E2_EVENTS       = 608
+E2_REMOTE       = 32
+E2_NUMERS       = 64
+E2_EVENTS       = 128
 E2_SIZE         = 2048
 
 ;EVENT RELATED DECLARATION
 MAXEVENT        = 30
-EVSIZE          = 48
+EVSIZE          = 64
+EVBEGIN         = 1
+EVCALL          = 2
+EVREPLAY        = 3
+EVEND           = 4
+
+;EVSIZE          = 48
 EV_DATE         = 0
 EV_TIME         = 3
 EV_CAUSE        = 4
@@ -133,13 +145,14 @@ EVDIGIT         = 8
 EVEND           = 16
 
 ;ALARM/END OF ALARM TYPES
+ALNONE          = 0
 ALREMOTE        = 1
 ALEXTERNAL      = 2
 ALINCOMING      = 3
 ALOUTGOING      = 4
-STRESET         = 1
-STPHONE         = 2
-STENDCYCLE      = 3
+STRESET         = 5
+STPHONE         = 6
+STENDCYCLE      = 7
 
 ;DIAGNOSTIC ERRORS
 DIAG_OK         = 0
@@ -195,11 +208,11 @@ TONE_C  := R120                         ; Tone glitch counter
 TONE_S  := R119                         ; Tone sampling counter
 DIGIT   := R118                         ; Last dialtone received
 PHONE   := R117                         ; User phone hook status
-CLOCK_C := R116                         ; RTC pause beetween reads
+;       := R116                         ;
 DISPFL  := R115                         ; Display updating flag
 DTMF_S  := R114                         ; Sample DTMF when set
-ALTYPE  := R113                         ; Alarm event type
-STTYPE  := R112                         ; End of alarm type
+ALSTATE := R113                         ; Alarm/End of alarm type
+EVIDX   := R112                         ; Current event index
 
 
 
@@ -548,38 +561,35 @@ init::
 
 diagnose::
    print   #line1, #msg_diag
+   ld      r0,#0
    call    rom_check
    call    e2_check
    call    rtc_check
-   ifbit r0,#DIAG_ROMFAIL
+   ifbit r0, #DIAG_ROMFAIL
       print   #line2, #msg_romfail
       led2    on
       sleep   #1000
-;      halt
+      halt
    }
-   ifbit r0,#DIAG_E2EMPTY
+   ifbit r0, #DIAG_E2EMPTY
       call    defaults
       ldw     (remote_buffer),#0
       call    remote_save
       call    save_setup
-;      jx      progr
    }
-   ifbit r0,#DIAG_E2FAIL
+   ifbit r0, #DIAG_E2FAIL
       print   #msg_diagfail, #msg_e2fail
       led2    on
       sleep   #1000
       halt
    }
-   ifbit r0,#DIAG_RTCFAIL
+   ifbit r0, #DIAG_RTCFAIL
       print   #line2, #msg_rtcfail
       led2    on
       sleep   #1000
       halt
    }
-   if [r0 == #0]
-   {        
-      print   #line2, #msg_allok
-   }
+   print   #line2, #msg_allok
    if [RTCFLAG != #0]
    {
       call    rtc_start
@@ -615,8 +625,8 @@ idle::
    relay1  off
    relay2  off
    mute    on
-   MC118   off
-   MC119   off
+   MC118   off                                 ; powerdown del MC34118
+   MC119   off                                 ; powerdown del MC34119
    sleep   #100
    remote_ei
 
@@ -641,25 +651,25 @@ main::
       if [ALARM > #0]
       {
          print    #line2, #message_altrig
-         ld       ALTYPE,#ALEXTERNAL
+         ld       ALSTATE,#ALEXTERNAL
          jx       allarme
       }
       if [PHONE != #0]
       {
-         ld       ALTYPE,#ALOUTGOING
+         ld       ALSTATE,#ALOUTGOING
          jx       outgoing
       }
       ldw    rr0,(frame_buffer)
       ifw [[rr0 == (remote_buffer)] && [rr0 != #0]]
       {
          print    #line2, #message_alrem
-         ld       ALTYPE,#ALREMOTE
+         ld       ALSTATE,#ALREMOTE
          jx       allarme
       }
       if [RINGS >= MAXRING]
       {
          print    #line2, #message_alring
-         ld       ALTYPE,#ALINCOMING
+         ld       ALSTATE,#ALINCOMING
          jx       allarme
       }
       call     clock
@@ -670,8 +680,8 @@ allarme::                                      ; inizio ciclo di allarme
    T0_stop
    remote_di
    led1    on                                  ; segnalazione visiva
-   MC118   on
-   MC119   on
+   MC118   on                                  ; wakeup del MC34118
+   MC119   on                                  ; wakeup del MC34119
 
    print   #line1, #message_alarm
    call    event_begin                         ; registrazione inizio
@@ -688,45 +698,48 @@ newcycle::
    ld     r13,REPT                             ; numero di ripetizioni
    if [r12 == #0]                              ; se ho finito i cicli allarme
    {
-      jx      noresponse                       ; e ho solo un ciclo finisco
+      jx      noresponse                       ; e non c'e' risposta finisco
    }
-   dec    r12
+   dec    r12                                  ; decremento del num. di cicli
    
 retry::
-
-   if [r2 > #8]                                ; se ho finito i numeri
+   if [r2 > #8]                                ; se ho finito gli 8 numeri
    {
       jx      newcycle                         ; ricomincio il ciclo
    } 
 
-   ld      r0,r2
-   call    number_read                         ; leggo il numero memorizzato
+   ld      r0,r2                               ; leggo il numero corrente
+   call    number_read                         ; memorizzato in e2prom
 
 ;   call    event_number                        ; registro il numero chiamato
 
-   dec     r13                                 ; avvenuta ripetizione
+   dec     r13                                 ; decremento una ripetizione
    if [r13 == #0]                              ; se ho finito di ripetere
    {
       inc     r2                               ; passo al numero successivo
    }
    if [(number) == #0]                         ; se il numero e' mancante
    {
-      jx       retry                           ; salto al successivo
+      jx       retry                           ; lo salto
    }
    relay1  on                                  ; prendo la linea telefonica
    sleep   #1000                               ; attendo 1 sec.
 
-   call    combtel                             ; compongo il numero
+   call    combtel                             ; compongo il numero corrente
 
-   ifbit SWITCH, #RESET                        ; secondo reset check
+   ifbit SWITCH, #RESET                        ; reset check
      jx       annullamento
    }
 
-   sleep   #2000                               ; attendo 2 sec. 
+   sleep   #1000                               ; attendo 1 sec. 
 
    call    _tone_sample                        ; controllo tono della linea
    if [r0 == #TONEBUSY]                        ; se occupato attacco....
    {
+      if [r12 == #0]                           ; se ho finito i cicli allarme
+      {
+         jx      noresponse                    ; e non c'e' risposta finisco
+      }
       relay1  off                               
       ld      COUNTCLK,PAUSE                   ; faccio una pausa
       call    T0_COUNTER                       ; impostata dall'utente
@@ -738,6 +751,7 @@ retry::
       }     
       jx   retry                               ; e poi ricomincio
    }
+;   call    _tone_sample_free                   ; controllo tono della linea
 
 ;   ld      COUNTCLK,#20                     ; faccio una pausa
 ;   call    T0_COUNTER                       ; impostata dall'utente
@@ -797,6 +811,10 @@ incoming::
 ;      if [[COUNTCLK == #0] [r0 == #TONEBUSY]]
       if [COUNTCLK == #0]                      ; ma se e' finito il tempo
       {
+         if [r12 == #0]                        ; se ho finito i cicli allarme
+         {
+            jx      noresponse                 ; e non c'e' risposta finisco
+         }
          relay1  off                           ; sgancio la linea
          ld      COUNTCLK,PAUSE
          call    T0_COUNTER                    ; e faccio una pausa
@@ -810,7 +828,7 @@ incoming::
       }
    }
 
-;   call    event_response
+;   call    event_replay
 
    ld      DIGIT,#0
 ;   ld      COUNTCLK,#
@@ -832,7 +850,7 @@ incoming::
          jx       annullamento
       }
    }
-   ld      STTYPE,#STPHONE
+   ld      ALSTATE,#STPHONE
    call    event_end
    relay1  off
    print   #message_alarm, #message_ok
@@ -841,14 +859,14 @@ incoming::
    
 noresponse::
    relay1  off
-   ld      STTYPE,#STENDCYCLE
+   ld      ALSTATE,#STENDCYCLE
    call    event_end
    print   #message_alarm, #message_noresp
    sleep   #2000
    jx      idle
 
 annullamento::
-   ld      STTYPE,#STRESET
+   ld      ALSTATE,#STRESET
    call    event_end
    print   #message_alarm, #message_break
    sleep   #2000
@@ -881,7 +899,7 @@ outgoing::
 
 progr::
 
-   MC118   on
+   MC118   on                                  ; wakeup del MC34118
    ld      r0,#11000000b
    call    _8880_ctrl_wr
 
@@ -1119,14 +1137,15 @@ menu_events::
       if [r1 == #1]
       {
          call    event_erase
+         if [EVENTS == #0]
+         {
+            break
+         }
       }
       if [r2 < r13]
       {
          ld      r0,r2
-         di
-         aaa::
          call    event_set
-         ei
          call    event_show
       }
    .endmenu
@@ -1257,7 +1276,7 @@ _WD_int::
       }
    }
    ;***********************
-   if [TONE_S < #36]                       ; poll line-tone input to
+   if [TONE_S < #MAXTONE]                  ; poll line-tone input to
    {                                       ; calculate a silence/tone ratio
       ld      r0,#200                    
       loop [r0] {
@@ -1288,8 +1307,10 @@ _8880_int::
    srp     #(3*2)                           ; switch context
    spp     #0
    and     EIPR,#~ip8880                    ; clear pending bit
-   call    _8880_status
-   ifbit   r0,#0101b                        ; verify (for spurious)
+   call    _8880_stat_rd
+   and     r0,#0101b                        
+   if [r0 == #0101b]                        ; verify (for spurious)
+   {
       call    _8880_data_rd
       ld      DIGIT,r0                      ; valid data in DIGIT
 	}
@@ -1557,7 +1578,7 @@ _display_write::
 	ret
 
 ;***************************************
-;******************** display char write
+;********************* display char read
 ;***************************************
 ;_display_read::
 ;   call    _display_nibble_rd
@@ -1573,21 +1594,17 @@ _display_write::
 ;***************************************
 _display_ready:: 
 ;   pushu   P0D
-;   pushu   PPR
-;   P1_PAGE
 ;   ;***********************
 ;   ld      P0D,#01011111b          ; modo instruzioni & read
 ;   ;***********************
-;   ld     r2,#0FFh
-;   loop [r2] {
+;   loop {
 ;      call    _display_read
-;      ifbit   r0,#10000000b        ; controlla il BF
+;      ifnobit   r0,#10000000b       ; controlla il BF
 ;         break
 ;      }
 ;   }
    delay   #20
 ;   ;***********************
-;   popu    PPR
 ;   popu    P0D
 	ret
 
@@ -1636,11 +1653,11 @@ combtel_dtmf::
       ld      r0,(rr8)+
 		call    _8880_data_wr
       do {
-         call    _8880_status
+         call    _8880_stat_rd
          and     r0,#0010b
       } while [r0 == #0]
       inc     r10
-      if [[(number) == #ZERO] && [PBX != #0] && [r10 == #1]]
+      if [[(number) == #10] && [PBX != #0] && [r10 == #1]]
       {
          sleep   #800
       }
@@ -1660,7 +1677,7 @@ _8880_init::
 	call    _8880_ctrl_wr
    ld      r0,#10000000b
 	call    _8880_ctrl_wr
-   call    _8880_status
+   call    _8880_stat_rd
    ret
 
 ;***************************************
@@ -1702,7 +1719,7 @@ _8880_ctrl_wr::
 ;* output: r0 1AAABBBB
 ;*
 ;***************************************
-_8880_status::
+_8880_stat_rd::
    pushu   P0D
    ld      r1,#(RS0 | RWN | 15)    ; 00111111b  
    ld      P0D,r1
@@ -1845,7 +1862,7 @@ _1420_stop::
 ;**************************************************************************
 
 ;****************************************
-;************** Routine di riconoscimento
+;** Riconoscimento toni PBX/DIAL/BUSY/HIZ
 ;****************************************
 
 _tone_sample::
@@ -1858,29 +1875,28 @@ _tone_sample::
    ld      TONE_C,#0
    ld      TONE_S,#0
    sleep   #200
-   while [TONE_S < #36]
+   while [TONE_S < #MAXTONE]
    {
-     nop
+      nop
    }
    ld      r1,TONE_C
    if [[TONE_C > #11] && [TONE_C < #15]]     ; 11-15 
    {
-     ld       r0,#TONEDIAL
+      ld       r0,#TONEDIAL
    }
    if [[TONE_C > #17] && [TONE_C < #22]]     ; 17-22
    {
-     ld       r0,#TONEBUSY
+      ld       r0,#TONEBUSY
    }
    if [TONE_C > #26]                         ; 26+
    {
-     ld       r0,#TONEPBX
+      ld       r0,#TONEPBX
    }
    if [TONE_C < #6]
    {
-     ld       r0,#TONEHIZ
+      ld       r0,#TONEHIZ
    }
 	ret
-
 
 ;**************************************************************************
 ;***************************** Telecomando ********************************
@@ -1926,11 +1942,8 @@ _frame_sample::
 ;*********** I2C bus operations on slaves
 ;****************************************
 _i2c_transfer::
-   pushu   PPR                             ; critical section begin
+   pushu   PPR                             
    spp     #0
-   clr     EIPR                            
-   pushu   EIMR
-   clr     EIMR
    spi_di
    ifw [SLAVE_ABS > #255]                 
    {                                     
@@ -1965,8 +1978,7 @@ _i2c_transfer::
 
    waitbit SLAVE_STAT,#SLAVE_READY
    delay   #2300
-   popu    EIMR
-   popu    PPR                             ; critical section end
+   popu    PPR                             
    ret
 
 ;****************************************
@@ -2071,7 +2083,7 @@ T0_COUNTER::
    ret
 
 ;****************************************
-;************** Ritardo di x millisecondi
+;************ Ritardo di rr0 millisecondi
 ;****************************************
 _msleep::
    pushuw  rr2
@@ -2089,7 +2101,6 @@ _msleep::
 ;**************************************************************************
 
 rom_check::
-   ldw     rr0,#0
    ldw     rr2,#0
    ldw     rr4,#0
    di
@@ -2100,13 +2111,33 @@ rom_check::
       addw    rr2,(rr4)
       addw    rr4,#2
    }
-checktest::
-   ifw [(checksum) != rr2]
+   ldw     rr4,(checksum)
+   sdm
+   ei
+   ifw [[rr4 != #0] && [rr4 != rr2]]
    {
       or      r0,#DIAG_ROMFAIL
    }
-   sdm
-   ei
+aaa::
+nop
+
+   ifw [rr4 == #0]
+   {
+      di
+      print   #line2,#msg_romck
+
+bbb::
+nop
+      ldw     rr4,#line2+11
+      byte2hex r3,r7,r6
+      ld      (rr4)+,r7
+      ld      (rr4)+,r6
+      byte2hex r2,r7,r6
+      ld      (rr4)+,r7
+      ld      (rr4)+,r6
+      ei
+      sleep   #3000
+   }
    ret
 
 
@@ -2173,7 +2204,7 @@ defaults::
    ld      DECADIC, #0
    ld      MAXRING, #9
    ld      CYCLES,  #2
-   ld      REPT,    #3
+   ld      REPT,    #5
    ld      MAXCONF, #60
    ld      MAXRES,  #60
    ld      PAUSE,   #60
@@ -2237,12 +2268,7 @@ clock::
    pushuw  rr2
    pushuw  rr4
    pushuw  rr8
-   dec     CLOCK_C
-   if [SETZ]
-   {
-      call    rtc_read
-      ld      CLOCK_C,#200
-   }
+   call    rtc_read
    di
    blank   line2
    ldw     rr6,#line2+12
@@ -2349,7 +2375,6 @@ rtc_read::
    ldw     rr0,#i2c_buffer
    ldw     rr2,#rtc_buffer
    ld      r4,#8
-   ld      r4,#10
    loop [r4] {
       lddd    (rr2)+,(rr0)+
    }
@@ -2830,32 +2855,11 @@ setup_enter::
    ret
 
 
-event_set::
-;   di
-   pushu   r1
-   pushu   r2
-   ld      r4,LASTEV
-   sub     r4,r0
-   if [r4 < #0]
-   {
-;       inc    r4
-       add    r4,EVENTS
-   }
-   ldw     rr8,#EVSIZE
-   mul     rr8,r4
-   ldw     rr2,#E2_EVENTS
-   addw    rr8,rr2
-   popu    r2
-   popu    r1
-;   ei
-   ret
-
-
 event_show::
    pushuw  rr0
    pushuw  rr2
    pushu   r6
-   I2C  READ,E2_SLAVE,rr8,#3
+   I2C  READ,E2_SLAVE,rr8,#8
    di
    print   #line1, #event_num
    ldw     rr4,#line1+11
@@ -2871,30 +2875,50 @@ event_show::
    ld      (rr4),r3
    incw    rr4
    ld      (rr4),r2
-   ei
    blank   line2
-   ldw     rr6,#line2+12
-   ldw     rr4,#i2c_buffer
-   ld      r8,#47
-   ld      r3,#3
+   ldw     rr6,#line2+15
+   ldw     rr4,#i2c_buffer+5
+   ld      r3,#2
    loop [r3]
    {
-      ld    r0,(rr4)
-      incw  rr4
+      ld      r0,(rr4)
+      incw    rr4
       byte2nibble r0,r2,r1
       bcd2ascii r1,r1
       bcd2ascii r2,r2
-      ld    -(rr6),r1
-      ld    -(rr6),r2
-      if [[r3 == #2] || [r3 == #3]]
+      ld      -(rr6),r1
+      ld      -(rr6),r2
+      if [r3 == #2]
       {
-         ld    -(rr6),r8
+         ld      r8,#58
+         ld      -(rr6),r8
       }
    }
+   ld      r8,#45
+   ld      -(rr6),r8
+   ldw     rr4,#i2c_buffer+3
+   ld      r3,#3
+   loop [r3]
+   {
+      ld      r0,(rr4)
+      decw    rr4
+      byte2nibble r0,r2,r1
+      bcd2ascii r1,r1
+      bcd2ascii r2,r2
+      ld      -(rr6),r1
+      ld      -(rr6),r2
+      if [[r3 == #2] || [r3 == #3]]
+      {
+         ld      r8,#47
+         ld      -(rr6),r8
+      }
+   }
+   ei
    popu    r6
    popuw   rr2
    popuw   rr0
    ret
+
 
 event_view::
    pushuw  rr0
@@ -3013,9 +3037,10 @@ event_view::
    popuw   rr0
    ret
 
+
 event_erase::
    dec     LASTEV
-   if [EVENTS < #MAXEVENT]
+   if [EVENTS <= #MAXEVENT]
    {
       dec     EVENTS
    }
@@ -3026,11 +3051,30 @@ event_erase::
    }
    if [LASTEV < #0]
    {
-      ld      LASTEV,EVENTS ; (or #MAXEVENT-1)
+      ld      LASTEV,EVENTS 
       dec     LASTEV
    }
    call    save_setup
    ret
+
+
+event_set::
+   pushu   r1
+   pushu   r2
+   ld      r4,LASTEV
+   sub     r4,r0
+   if [[r0 != #0] && [r4 < #0]]
+   {
+       add    r4,EVENTS
+   }
+   ldw     rr8,#EVSIZE
+   mul     rr8,r4
+   ldw     rr2,#E2_EVENTS
+   addw    rr8,rr2
+   popu    r2
+   popu    r1
+   ret
+
 
 event_begin::
    if [RTCFLAG == #0]
@@ -3039,9 +3083,22 @@ event_begin::
    }
    pushuw  rr0
    pushuw  rr2
+   inc     EVENTS
+   inc     LASTEV
+   if [EVENTS > #MAXEVENT]
+   {
+      ld      EVENTS,#MAXEVENT
+   }
+   if [LASTEV >= EVENTS]
+   {
+      ld      LASTEV,#0
+   }
+   call    save_setup
    call    rtc_read
    ldw     rr6,#i2c_buffer
    ldw     rr2,#rtc_buffer+4
+   ld      (rr6),#EVBEGIN
+   incw    rr6
    lddd    (rr6)+,(rr2)+
    lddd    (rr6)+,(rr2)+
    lddd    (rr6)+,(rr2)+
@@ -3049,15 +3106,12 @@ event_begin::
    lddd    (rr6)+,(rr2)+
    lddd    (rr6)+,(rr2)+
    lddd    (rr6)+,(rr2)+
-   if [ALARM != #0]
-   {
-      ld      (rr6),#EVALARM
-   } else {
-      ld      (rr6),#EVREMOTE
-   }
+   ld      r0,ALSTATE
+   ld      (rr6),r0
    ld      r0,#0
    call    event_set
-   I2C WRITE,E2_SLAVE,rr8,#7
+   I2C WRITE,E2_SLAVE,rr8,#8
+   ld      EVIDX,#8
    popuw   rr2
    popuw   rr0
    ret
@@ -3071,6 +3125,8 @@ event_number::
    pushuw  rr2
    call    rtc_read
    ldw     rr6,#i2c_buffer
+   ld      (rr6),#EVCALL
+   incw    rr6
    ld      (rr6),r0
    incw    rr6
    ldw     rr2,#rtc_buffer
@@ -3079,8 +3135,11 @@ event_number::
    lddd    (rr6)+,(rr2)+
    ld      r0,#0
    call    event_set
-   addw    rr8,#8
-   I2C WRITE,E2_SLAVE,rr8,#4
+   ld      r0,#0
+   ld      r1,EVIDX
+   addw    rr8,rr0
+   I2C WRITE,E2_SLAVE,rr8,#5
+   add     EVIDX,#5
    popuw   rr2
    popuw   rr0
    ret
@@ -3094,6 +3153,8 @@ event_replay::
    pushuw  rr2
    call    rtc_read
    ldw     rr6,#i2c_buffer
+   ld      (rr6),#EVREPLAY
+   incw    rr6
    ld      (rr6),r0
    incw    rr6
    ldw     rr2,#rtc_buffer
@@ -3102,8 +3163,11 @@ event_replay::
    lddd    (rr6)+,(rr2)+
    ld      r0,#0
    call    event_set
-   addw    rr8,#8
-   I2C WRITE,E2_SLAVE,rr8,#4
+   ld      r0,#0
+   ld      r1,EVIDX
+   addw    rr8,rr0
+   I2C WRITE,E2_SLAVE,rr8,#5
+   add     EVIDX,#5
    popuw   rr2
    popuw   rr0
    ret
@@ -3118,32 +3182,19 @@ event_end::
    call    rtc_read
    ldw     rr6,#i2c_buffer
    ldw     rr2,#rtc_buffer
+   ld      (rr6),#EVEND
+   incw    rr6
    lddd    (rr6)+,(rr2)+
    lddd    (rr6)+,(rr2)+
    lddd    (rr6)+,(rr2)+
-   ifbit SWITCH,#RESET
-      ld      (rr6),#EVRESET
-   } else {
-      ld      (rr6),#EVDIGIT
-   }
+   ld      r0,ALSTATE
+   ld      (rr6),r0
    ld      r0,#0
    call    event_set
-   addw    rr8,#12
-   I2C WRITE,E2_SLAVE,rr8,#4
-   inc     EVENTS
-   if [EVENTS > #1]
-   {
-      inc     LASTEV
-   }
-   if [EVENTS > #MAXEVENT]
-   {
-      ld      EVENTS,#MAXEVENT
-   }
-   if [LASTEV >= EVENTS]
-   {
-      ld      LASTEV,#0
-   }
-   call    save_setup
+   ld      r0,#0
+   ld      r1,EVIDX
+   addw    rr8,rr0
+   I2C WRITE,E2_SLAVE,rr8,#5
    popuw   rr2
    popuw   rr0
    ret
@@ -3334,154 +3385,155 @@ _print::
 ;**************************************************************************
 
 ;                        .org    ROMDATA
-id::                    .ascii  "FW 0.93B Tuccia (C) 1997"
+id:                     .ascii  "FW 0.93B Tuccia (C) 1997"
 
 ;****************************************
 ;**************** Messaggi per il display
 ;****************************************
 
-message_open::          .ascii  "    PT117/96    "
-message_name::          .ascii  "Nova Elettra srl"
-msg_diagok::            .ascii  "Hard Ok  Soft Ok"
-msg_diagfail::          .ascii  "Rilevato guasto:"
-message_ok::            .ascii  "   INOLTRATO    "
-message_noresp::        .ascii  " NON INOLTRATO! "
-message_ready::         .ascii  "Telesoccorso DGE"
-message_time::          .ascii  "    ##:##:##    "
-message_alarm::         .ascii  "Allarme in corso"
-message_alrem::         .ascii  "dal telecomando!"
-message_alring::        .ascii  "chiamata entran."
-message_altrig::        .ascii  "  dal pulsante  "
-message_alout::         .ascii  "numero non comp."
-message_break::         .ascii  "   ANNULLATO    "
-message_attendere::     .ascii  "attendere prego."
+message_open:           .ascii  "    PT117/96    "
+message_name:           .ascii  "Nova Elettra srl"
+msg_diagok:             .ascii  "Hard Ok  Soft Ok"
+msg_diagfail:           .ascii  "Rilevato guasto:"
+message_ok:             .ascii  "   INOLTRATO    "
+message_noresp:         .ascii  " NON INOLTRATO! "
+message_ready:          .ascii  "Telesoccorso DGE"
+message_time:           .ascii  "    ##:##:##    "
+message_alarm:          .ascii  "Allarme in corso"
+message_alrem:          .ascii  "dal telecomando!"
+message_alring:         .ascii  "chiamata entran."
+message_altrig:         .ascii  "  dal pulsante  "
+message_alout:          .ascii  "numero non comp."
+message_break:          .ascii  "   ANNULLATO    "
+message_attendere:      .ascii  "attendere prego."
 
-msg_diag::              .ascii  "  AUTODIAGNOSI  "
-msg_allok::             .ascii  "Hard:Ok  Soft:Ok"
-msg_romfail::           .ascii  "Checksum errato!"
-msg_romok::             .ascii  "Checksum ROM: Ok"
-msg_e2fail::            .ascii  "E2 non risponde!"
-msg_e2ok::              .ascii  "Checksum E2:  Ok"
-msg_empty1::            .ascii  "Prima accensione"
-msg_empty2::            .ascii  "caricato default"
-msg_rtcfail::           .ascii  "RTC non rilevato"
-msg_rtcok::             .ascii  "Checksum RTC: Ok"
-msg_rtcno::             .ascii  "(no reg. eventi)"
-msg_8880fail::          .ascii  "Registri MT8880!"
-msg_8880ok::            .ascii  "MT8880 Regs:  Ok"
+msg_diag:               .ascii  "  AUTODIAGNOSI  "
+msg_allok:              .ascii  "Hard:Ok  Soft:Ok"
+msg_romfail:            .ascii  "Checksum errato!"
+msg_romok:              .ascii  "Checksum ROM: Ok"
+msg_romck:              .ascii  "Checksum:  #### "
+msg_e2fail:             .ascii  "E2 non risponde!"
+msg_e2ok:               .ascii  "Checksum E2:  Ok"
+msg_empty1:             .ascii  "Prima accensione"
+msg_empty2:             .ascii  "caricato default"
+msg_rtcfail:            .ascii  "RTC non rilevato"
+msg_rtcok:              .ascii  "Checksum RTC: Ok"
+msg_rtcno:              .ascii  "(no reg. eventi)"
+msg_8880fail:           .ascii  "Registri MT8880!"
+msg_8880ok:             .ascii  "MT8880 Regs:  Ok"
 
-message_call::          .ascii  "Composizione del"
-message_resp::          .ascii  "Risponde il num."
+message_call:           .ascii  "Composizione del"
+message_resp:           .ascii  "Risponde il num."
                                    
-message_progst::        .ascii  " Programmazione "
-message_tastipr::       .ascii  " *~  # Conferma "
-message_tastibegin::    .ascii  "Alzare cornetta!"
-message_tastiend1::     .ascii  "    Alla fine   "
-message_tastiend2::     .ascii  "  riagganciare. "
-message_fineprog1::     .ascii  " Programmazione "
-message_fineprog2::     .ascii  "   terminata.   "
-menu_messaggi::         .ascii  "    Messaggi   ~"
-menu_numeri::           .ascii  "  Numeri Tel. ~"
-menu_telecomando::      .ascii  " Telecomando  ~"
-menu_imposta::          .ascii  " Impostazioni ~"
-menu_oradata::          .ascii  "  Ora / Data  ~"
-menu_eventi::           .ascii  "Registro eventi"
-sub_notavail1::         .ascii  "Non disponibile!"
-sub_notavail2::         .ascii  " *             "
+message_progst:         .ascii  " Programmazione "
+message_tastipr:        .ascii  " *~  # Conferma "
+message_tastibegin:     .ascii  "Alzare cornetta!"
+message_tastiend1:      .ascii  "    Alla fine   "
+message_tastiend2:      .ascii  "  riagganciare. "
+message_fineprog1:      .ascii  " Programmazione "
+message_fineprog2:      .ascii  "   terminata.   "
+menu_messaggi:          .ascii  "    Messaggi   ~"
+menu_numeri:            .ascii  "  Numeri Tel. ~"
+menu_telecomando:       .ascii  " Telecomando  ~"
+menu_imposta:           .ascii  " Impostazioni ~"
+menu_oradata:           .ascii  "  Ora / Data  ~"
+menu_eventi:            .ascii  "Registro eventi"
+sub_notavail1:          .ascii  "Non disponibile!"
+sub_notavail2:          .ascii  " *             "
 
-messaggi_record1::      .ascii  "    Registra   ~"
-messaggi_record2::      .ascii  " *~   # Inizia  "
-messaggi_play1::        .ascii  "  Riascolta   ~"
-messaggi_play2::        .ascii  " *~   # Inizia  "
-sub_record1::           .ascii  "  Parlare nel   "
-sub_record2::           .ascii  " microfono....  "
-sub_recend1::           .ascii  "   Messaggio    "
-sub_recend2::           .ascii  "  registrato.   "
-sub_play1::             .ascii  "   Ascoltare    "
-sub_play2::             .ascii  " il messaggio..."
-sub_playend1::          .ascii  "     Fine       "
-sub_playend2::          .ascii  "   messaggio.   "
-messaggi_alarm::        .ascii  "Mess. Allarme #~"
+messaggi_record1:       .ascii  "    Registra   ~"
+messaggi_record2:       .ascii  " *~   # Inizia  "
+messaggi_play1:         .ascii  "  Riascolta   ~"
+messaggi_play2:         .ascii  " *~   # Inizia  "
+sub_record1:            .ascii  "  Parlare nel   "
+sub_record2:            .ascii  " microfono....  "
+sub_recend1:            .ascii  "   Messaggio    "
+sub_recend2:            .ascii  "  registrato.   "
+sub_play1:              .ascii  "   Ascoltare    "
+sub_play2:              .ascii  " il messaggio..."
+sub_playend1:           .ascii  "     Fine       "
+sub_playend2:           .ascii  "   messaggio.   "
+messaggi_alarm:         .ascii  "Mess. Allarme #~"
 
-sub_numeri1::           .ascii  "   Numeri Tel.  "
-sub_numeri2::           .ascii  " *  # Conferma "
+sub_numeri1:            .ascii  "   Numeri Tel.  "
+sub_numeri2:            .ascii  " *  # Conferma "
 
-sub_remote1::           .ascii  "   Aquisisci   ~"
-sub_remote2::           .ascii  " *~    # Inizia "
-sub_remcode1::          .ascii  " Imposta man. ~"
-sub_remcode2::          .ascii  "  ############  "
+sub_remote1:            .ascii  "   Aquisisci   ~"
+sub_remote2:            .ascii  " *~    # Inizia "
+sub_remcode1:           .ascii  " Imposta man. ~"
+sub_remcode2:           .ascii  "  ############  "
 
-sub_remhit1::           .ascii  "Premere il tasto"
-sub_remhit2::           .ascii  "del telecomando!"
-sub_remok::             .ascii  "Codice aquisito:"
-sub_remfail1::          .ascii  "  Telecomando   "
-sub_remfail2::          .ascii  " NON AQUISITO!  "
+sub_remhit1:            .ascii  "Premere il tasto"
+sub_remhit2:            .ascii  "del telecomando!"
+sub_remok:              .ascii  "Codice aquisito:"
+sub_remfail1:           .ascii  "  Telecomando   "
+sub_remfail2:           .ascii  " NON AQUISITO!  "
+              
+sub_time1:              .ascii  "  Cambio ORA:  ~"
+sub_time2:              .ascii  "    ##:##:##    " 
+sub_date1:              .ascii  "  Cambio DATA: ~"
+sub_date2:              .ascii  "   ##/##/####   " 
 
-sub_time1::             .ascii  "  Cambio ORA:  ~"
-sub_time2::             .ascii  "    ##:##:##    " 
-sub_date1::             .ascii  "  Cambio DATA: ~"
-sub_date2::             .ascii  "   ##/##/####   " 
+sub_T0_1:               .ascii  "Pausa tra telef:" 
+sub_T1_1:               .ascii  "Tempo max reset:" 
+sub_T2_1:               .ascii  "Tempo conferma: " 
+sub_times_2:            .ascii  "   ## secondi   "
+sub_C0_1:               .ascii  "Ripetiz. numeri:" 
+sub_turns_2:            .ascii  "    # volte     "  
+sub_C1_1:               .ascii  "Ripetiz. ciclo: " 
+sub_C2_1:               .ascii  "Risposta dopo:  " 
+sub_C2_2:               .ascii  "    # squilli   "  
+sub_selection1:         .ascii  "Selez. decadica:"
+sub_yesno2:             .ascii  "       #        "
+sub_pbx1:               .ascii  "Collegato a PBX:"
+sub_usrdgt1:            .ascii  "Fine allarme    "
+sub_usrdgt2:            .ascii  "con numero:  #  "
 
-sub_T0_1::              .ascii  "Pausa tra telef:" 
-sub_T1_1::              .ascii  "Tempo max reset:" 
-sub_T2_1::              .ascii  "Tempo conferma: " 
-sub_times_2::           .ascii  "   ## secondi   "
-sub_C0_1::              .ascii  "Ripetiz. numeri:" 
-sub_turns_2::           .ascii  "    # volte     "  
-sub_C1_1::              .ascii  "Ripetiz. ciclo: " 
-sub_C2_1::              .ascii  "Risposta dopo:  " 
-sub_C2_2::              .ascii  "    # squilli   "  
-sub_selection1::        .ascii  "Selez. decadica:"
-sub_yesno2::            .ascii  "       #        "
-sub_pbx1::              .ascii  "Collegato a PBX:"
-sub_usrdgt1::           .ascii  "Fine allarme    "
-sub_usrdgt2::           .ascii  "con numero:  #  "
+sub_tempi1:             .ascii  "    Tempi     ~"
+sub_tempi2:             .ascii  " *             "
+sub_riservato1:         .ascii  "  Riservato    "
+sub_riservato2:         .ascii  " *             "
+numeri_begin:           .ascii  "   Numero  #:   "
+numeri_absent:          .ascii  "Non programmato."
+menu_preced1:           .ascii  "   Ritorna al   "
+menu_preced2:           .ascii  "menu precedente."
 
-sub_tempi1::            .ascii  "    Tempi     ~"
-sub_tempi2::            .ascii  " *             "
-sub_riservato1::        .ascii  "  Riservato    "
-sub_riservato2::        .ascii  " *             "
-numeri_begin::          .ascii  "   Numero  #:   "
-numeri_absent::         .ascii  "Non programmato."
-menu_preced1::          .ascii  "   Ritorna al   "
-menu_preced2::          .ascii  "menu precedente."
+message_cornetta:       .ascii  "Cornetta telef. "
+message_abbassata:      .ascii  "   ABBASSATA    "
+message_alzata:         .ascii  "     ALZATA     "
 
-message_cornetta::      .ascii  "Cornetta telef. "
-message_abbassata::     .ascii  "   ABBASSATA    "
-message_alzata::        .ascii  "     ALZATA     "
+malvenuto:              .ascii  "Guarda i numeri:"
+telesoccorso:           .ascii  "Il telesoccorso:"
+telecomando:            .ascii  "Il telecomando: "
 
-malvenuto::             .ascii  "Guarda i numeri:"
-telesoccorso::          .ascii  "Il telesoccorso:"
-telecomando::           .ascii  "Il telecomando: "
+msgtony:                .ascii  "Linea telefonica"
+msgoccupato:            .ascii  "    OCCUPATA    "
+msglibero:              .ascii  "     LIBERA     "
+msgpbx:                 .ascii  "   PBX LIBERO   "
+msghiz:                 .ascii  " ALTA IMPEDENZA "
 
-msgtony::               .ascii  "Linea telefonica"
-msgoccupato::           .ascii  "    OCCUPATA    "
-msglibero::             .ascii  "     LIBERA     "
-msgpbx::                .ascii  "   PBX LIBERO   "
-msghiz::                .ascii  " ALTA IMPEDENZA "
+event_num:              .ascii  "   Evento  ##:  "
+event_date:             .ascii  "    ##/##/##    "
 
-event_num::             .ascii  "   Evento  ##:  "
-event_date::            .ascii  "    ##/##/##    "
+event_begin1:           .ascii  "Inizio: ##:##:##"
+event_remote:           .ascii  "con telecomando "
+event_alarm:            .ascii  "con allarme est."
 
-event_begin1::          .ascii  "Inizio: ##:##:##"
-event_remote::          .ascii  "con telecomando "
-event_alarm::           .ascii  "con allarme est."
-
-event_end1::            .ascii  "Fine:   ##:##:##"
-event_reset::           .ascii  " con reset man. "
-event_digit::           .ascii  "con reset remot."
-
-event_num1::            .ascii  "Chiamata del N.#"
-event_num2::            .ascii  "alle:   ##:##:##"
+event_end1:             .ascii  "Fine:   ##:##:##"
+event_reset:            .ascii  " con reset man. "
+event_digit:            .ascii  "con reset remot."
+             
+event_num1:             .ascii  "Chiamata del N.#"
+event_num2:             .ascii  "alle:   ##:##:##"
 
 ;**************************************************************************
 ;************************* Fine ROM - Checksum ****************************
 ;**************************************************************************
 
-                        .org    (ROMSIZE - 8)
+;                        .org    (ROMSIZE - 8)
 pattern::               .byte   055h,0AAh
 serial::                .byte   1,0,0,0
-checksum::              .byte   0,0
+checksum::              .byte   0xFF,0xDF
 
 
 ;**************************************************************************
