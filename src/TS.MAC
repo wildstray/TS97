@@ -25,6 +25,7 @@
 ;* zero                 address,lenght  ; zeros a buffer of lenght bytes
 ;* byte2bcd             byte,bcd10,bcd1 ; byte to BCD (9,9)
 ;* bcd2byte             bcd10,bcd1,byte ; BCD to byte (9,9)
+;* timeto               display,from    ; Display time from a buffer (##:##)
 ;****************************************************************************
 
 ;************************                       
@@ -301,7 +302,34 @@
    }
 .endm
 ;************************
-
-
+.macro timeto display,from
+   pushuw  rr0 
+   pushuw  rr2 
+   pushuw  rr4 
+   pushuw  rr6 
+   ldw     rr0,#display
+   ldw     rr2,#from
+   ld      r4,#2  
+   loop [r4]
+   {
+      ld      r5,(rr2)
+      incw    rr2
+      byte2nibble r5,r7,r6
+      bcd2ascii r6,r6
+      bcd2ascii r7,r7
+      ld      -(rr0),r6
+      ld      -(rr0),r7
+      if [r4 == #2]
+      {               
+         ld      r5,#58
+         ld      -(rr0),r5
+      }
+   }
+   popuw   rr6
+   popuw   rr4
+   popuw   rr2
+   popuw   rr0
+.endm
+;************************
 
 

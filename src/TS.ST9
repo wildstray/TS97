@@ -62,7 +62,7 @@ SCI_IVR         = 0x40                  ; Start SCI int vector
 EXT_IVR         = 0x50                  ; External interrupt base vector
 MFT_IVR         = 0xC0                  ; Multifunction timer int vector
 START           = 0x100                 ; Start of C startup code
-ROMDATA         = 0x3000                ; Static data start
+ROMDATA         = 0x3800                ; Static data start
 ROMSIZE         = 0x4000-64             ; ROM size minus 64 reserved bytes
 
 
@@ -99,20 +99,13 @@ TONEHIZ         = 0                 ; High impedence / silence
 TONEDIAL        = 1                 ; Italian dialtone
 TONEPBX         = 2                 ; PBX / interational dialtone
 TONEBUSY        = 3                 ; Busy tone
-TONEFREE        = 4                 ; Free / waiting for replay
+TONEFREE        = 4                 ; Free / waiting for reply
 
 ;MENUS/KEYPAD DECLARATION
 FORWBACK        = 11
 CONFIRM         = 12
 
 ;E2PROM MEMORY LOCATIONS
-;E2_CHECKSUM     = 0
-;E2_SERIAL       = 2
-;E2_SETUP        = 16
-;E2_REMOTE       = 64
-;E2_NUMERS       = 480
-;E2_EVENTS       = 608
-;E2_SIZE         = 2048
 E2_CHECKSUM     = 0
 E2_SERIAL       = 2
 E2_SETUP        = 16
@@ -120,29 +113,15 @@ E2_REMOTE       = 32
 E2_NUMERS       = 64
 E2_EVENTS       = 128
 E2_SIZE         = 2048
+E2_PGSIZE       = 256
 
 ;EVENT RELATED DECLARATION
 MAXEVENT        = 30
 EVSIZE          = 64
-EVBEGIN         = 1
-EVCALL          = 2
-EVREPLAY        = 3
-EVEND           = 4
-
-;EVSIZE          = 48
-EV_DATE         = 0
-EV_TIME         = 3
-EV_CAUSE        = 4
-EV_NUM          = 5
-EV_END          = 6
-EV_HOW          = 7
-EVALARM         = 4
-EVREMOTE        = 8
-EVTIMEOUT       = 16
-EVRING          = 32
-EVRESET         = 4
-EVDIGIT         = 8
-EVEND           = 16
+EVBEGIN         = 0x81
+EVCALL          = 0x82
+EVREPLY         = 0x83
+EVEND           = 0x84
 
 ;ALARM/END OF ALARM TYPES
 ALNONE          = 0
@@ -208,9 +187,9 @@ TONE_C  := R120                         ; Tone glitch counter
 TONE_S  := R119                         ; Tone sampling counter
 DIGIT   := R118                         ; Last dialtone received
 PHONE   := R117                         ; User phone hook status
-;       := R116                         ;
+LASTNUM := R116                         ; Last number dialed
 DISPFL  := R115                         ; Display updating flag
-DTMF_S  := R114                         ; Sample DTMF when set
+RING_T  := R114                         ; Ring counter timeout
 ALSTATE := R113                         ; Alarm/End of alarm type
 EVIDX   := R112                         ; Current event index
 
@@ -236,7 +215,7 @@ MAXCONF := R98                          ; Tempo massimo per confermare
 MAXRES  := R97                          ; Tempo max. reset chimate uscenti
 PAUSE   := R96                          ; Pausa tra una chiamata e l'altra
 SETUP_BK:= 96                           ; Bank 6 contiene il setup
-
+MAXPARAMS = 9                           ; Numero di impostazioni utilizzate
 
 
 ;**************
@@ -551,9 +530,9 @@ init::
 	call    _8880_init
    call    _1420_init
 
-   led1    off
-   led2    off
-   backlight off
+   led1    on
+   led2    on
+   backlight on
 
    clr     EIPR
 
@@ -595,6 +574,10 @@ diagnose::
       call    rtc_start
    }
    sleep   #1000
+
+   led1    off
+   led2    off
+   backlight off
    call    display_bufclr
 
 
@@ -616,7 +599,6 @@ idle::
    ld      ALARM,#0
    ld      HOOK,#0
    ld      SWITCH,#0
-   ld      TONE_S,#255
    ld      RING_C,#0
    ld      RINGS,#0
 
@@ -656,6 +638,8 @@ main::
       }
       if [PHONE != #0]
       {
+         ld       RING_C,#0
+         ld       RINGS,#0
          ld       ALSTATE,#ALOUTGOING
          jx       outgoing
       }
@@ -667,7 +651,7 @@ main::
          jx       allarme
       }
       if [RINGS >= MAXRING]
-      {
+      {     
          print    #line2, #message_alring
          ld       ALSTATE,#ALINCOMING
          jx       allarme
@@ -688,42 +672,71 @@ allarme::                                      ; inizio ciclo di allarme
 
    if [RINGS >= MAXRING]                       ; se e' una chiamata entrante
    {
-       jx      incoming                        ; salto la composizione
+       ld       RING_C,#0
+       ld       RINGS,#0
+       sleep    #1000                          ; attendo fine dello squillo
+       relay1   on                             ; poi prendo la linea e
+       jx       incoming                       ; salto la composizione
    }
 
-   ld     r12,CYCLES
+   ld      r12,CYCLES                          ; carico il numero di cicli
+   ld      LASTNUM,#255                        ; invalido ultimo numero
 
 newcycle::
-   ld     r2,#0                                ; indice del numero telefonico
-   ld     r13,REPT                             ; numero di ripetizioni
+   ld      r2,#0                               ; indice del numero telefonico
+   ld      r13,REPT                            ; numero di ripetizioni
    if [r12 == #0]                              ; se ho finito i cicli allarme
    {
       jx      noresponse                       ; e non c'e' risposta finisco
    }
-   dec    r12                                  ; decremento del num. di cicli
+   dec     r12                                 ; decremento del num. di cicli
    
 retry::
-   if [r2 > #8]                                ; se ho finito gli 8 numeri
+   if [r2 > #7]                                ; se ho finito gli 8 numeri
    {
       jx      newcycle                         ; ricomincio il ciclo
    } 
 
    ld      r0,r2                               ; leggo il numero corrente
    call    number_read                         ; memorizzato in e2prom
+   if [(number) == #0]                         ; se il numero e' mancante
+   {
+      inc     r2        ; IIIIIIIIIIIIIIIIIIII ; passo al numero successivo
+      ld      r13,REPT  ; IIIIIIIIIIIIIIIIIIII                       
+      jx      retry                            ; lo salto
+   }
 
-;   call    event_number                        ; registro il numero chiamato
-
-   dec     r13                                 ; decremento una ripetizione
    if [r13 == #0]                              ; se ho finito di ripetere
    {
       inc     r2                               ; passo al numero successivo
+      ld      r13,REPT                         
+      jx      retry     ; MMMMMMMMMMMMMMMMMMMM                        
    }
-   if [(number) == #0]                         ; se il numero e' mancante
-   {
-      jx       retry                           ; lo salto
-   }
+   dec     r13                                 ; decremento una ripetizione
    relay1  on                                  ; prendo la linea telefonica
    sleep   #1000                               ; attendo 1 sec.
+
+   call    event_call                          ; registro il numero chiamato
+   ld      LASTNUM,r0                          ; solo alla prima ripetizione
+
+   di                                          ; segnalo cosa sto' facendo
+   print   #msg_evnum
+   blank   line2
+   ldw     rr6,#line2
+   ldw     rr4,#number
+   loop 
+   {
+      ld      r3,(rr4)+
+      bcd2ascii r3,r0
+      ld      (rr6)+,r0
+      if [r3 == #0]
+      {
+         ld      r0,#32
+         ld      -(rr6),r0
+         break
+      }
+   }
+   ei
 
    call    combtel                             ; compongo il numero corrente
 
@@ -736,7 +749,8 @@ retry::
    call    _tone_sample                        ; controllo tono della linea
    if [r0 == #TONEBUSY]                        ; se occupato attacco....
    {
-      if [r12 == #0]                           ; se ho finito i cicli allarme
+      print   #msg_telbusy,#msg_pause          ; segnalo la situazione
+      if [[r12 == #0] && [r13 == #0]]          ; se ho finito i cicli allarme
       {
          jx      noresponse                    ; e non c'e' risposta finisco
       }
@@ -751,27 +765,6 @@ retry::
       }     
       jx   retry                               ; e poi ricomincio
    }
-;   call    _tone_sample_free                   ; controllo tono della linea
-
-;   ld      COUNTCLK,#20                     ; faccio una pausa
-;   call    T0_COUNTER                       ; impostata dall'utente
-;   while [COUNTCLK != #0]
-;   {
-;      ifbit SWITCH, #RESET                  ; reset check
-;         jx    annullamento
-;      }
-;      call    _tone_sample
-;      tony::
-;      nop
-;      if [[r0 != #TONEHIZ] || [r0 != TONEFREE]]
-;      {
-;         ld    COUNTCLK,#0
-;         break
-;      }
-;   }     
-
-
-incoming::
 
    ld      r0,#11000000b                       ; reimposto l'8880
    call    _8880_ctrl_wr
@@ -811,7 +804,8 @@ incoming::
 ;      if [[COUNTCLK == #0] [r0 == #TONEBUSY]]
       if [COUNTCLK == #0]                      ; ma se e' finito il tempo
       {
-         if [r12 == #0]                        ; se ho finito i cicli allarme
+         print   #msg_noconf,#msg_pause        ; segnalo la situazione
+         if [[r12 == #0] && [r13 == #0]]       ; se ho finito i cicli allarme
          {
             jx      noresponse                 ; e non c'e' risposta finisco
          }
@@ -828,25 +822,26 @@ incoming::
       }
    }
 
-;   call    event_replay
+   call    event_reply
+
+incoming::
+   print   #msg_reply1,#msg_reply2            ; segnalo la situazione
 
    ld      DIGIT,#0
-;   ld      COUNTCLK,#
-;   call    T0_COUNTER
-   mute    off                                 ; attivazione vivavoce
+   mute    off                                ; attivazione vivavoce
 
    loop {                                      ; fino alla ricezione 
-      if [DIGIT == USRDGT]                     ; di un nuovo tono
+;      if [DIGIT == USRDGT]                    ; di un nuovo tono
+;      {
+;         break
+;
+;      }
+      call    _tone_sample                    ; fino alla rilevazione
+      if [r0 == #TONEBUSY]                    ; del tono di occupato
       {
          break
       }
-;      call    _tone_sample
-;      if [r0 == #TONEBUSY]
-;      if [[COUNTCLK == #0] [r0 == #TONEBUSY]]
-;      {
-;         break
-;      }
-      ifbit SWITCH, #RESET
+      ifbit SWITCH, #RESET                    ; o al reset manuale
          jx       annullamento
       }
    }
@@ -1074,7 +1069,7 @@ menu_numbers::
 menu_setup::
    pushu   r1
    pushu   r2
-   .menu #9
+   .menu #MAXPARAMS
       .display #0, sub_T0_1,,         setup_view
       .display #1, sub_T1_1,,         setup_view
       .display #2, sub_T2_1,,         setup_view
@@ -1084,13 +1079,14 @@ menu_setup::
       .display #6, sub_selection1,,   setup_view
       .display #7, sub_pbx1,,         setup_view
       .display #8, sub_usrdgt1,,      setup_view
-      .display #9, menu_preced1,      menu_preced2
-      if [[r1 == #CONFIRM] && [r2 < #9] && [r2 != r0]]
+      .display #MAXPARAMS, menu_preced1,      menu_preced2
+      .action #MAXPARAMS
+                 break
+      }
+;      if [[r1 == #CONFIRM] && [r2 < #MAXPARAMS] && [r2 != r0]]
+      if [[r1 == #CONFIRM] && [r2 < #MAXPARAMS]]
       {
          call    setup_enter
-      }
-      .action #9
-                 break
       }
    .endmenu
    popu    r2
@@ -1123,18 +1119,13 @@ menu_clock::
 menu_events::
    pushu   r1
    pushu   r2
-   ld      r0,#1
    ld      r13,EVENTS
    .menu r13
       .display r13, menu_preced1,      menu_preced2
       .action  r13
          break
       }
-      if [r1 == #CONFIRM]
-      {
-         call    event_view
-      }
-      if [r1 == #1]
+      if [r1 == #10]
       {
          call    event_erase
          if [EVENTS == #0]
@@ -1147,6 +1138,10 @@ menu_events::
          ld      r0,r2
          call    event_set
          call    event_show
+      }
+      if [[r1 == #CONFIRM] && [r2 < r13]]
+      {
+         call    event_view
       }
    .endmenu
    popu    r2
@@ -1260,20 +1255,32 @@ _WD_int::
    } else {
       and     SWITCH,#~PROG
    }
+   ;***********************
    ifnobit   P5DR,#RING                    ; poll ring detector or
       if [RING_C < #18]
       {
-        inc      RING_C
+         inc     RING_C                    ; check for signal every 50ms
       } else {
-        inc      RINGS
-        ld       RING_C,#0
+         inc     RINGS                     ; ring if it's 900ms long
+         ld      RING_C,#0                 ;
+         ld      RING_T,#0                 ; reset timeout counter
       }
    } else {
-      ifbit   P3DR,#HOOK                   ; phone hook status
-         ld      PHONE,#1
-      } else {
-         ld      PHONE,#0
+      inc        RING_T
+      if [RING_T > #100]                   ; reset after 5000ms of silence
+      {                                    
+         ld      RINGS,#0                  ; reset all ring counters
+         ld      RING_C,#0
+         ld      RING_T,#0
       }
+       if [RING_C == #0]
+       {
+          ifbit   P3DR,#HOOK               ; phone hook status
+             ld      PHONE,#1
+          } else {
+             ld      PHONE,#0
+          }
+       }
    }
    ;***********************
    if [TONE_S < #MAXTONE]                  ; poll line-tone input to
@@ -1578,7 +1585,7 @@ _display_write::
 	ret
 
 ;***************************************
-;********************* display char read
+;******************** display char write
 ;***************************************
 ;_display_read::
 ;   call    _display_nibble_rd
@@ -1594,17 +1601,21 @@ _display_write::
 ;***************************************
 _display_ready:: 
 ;   pushu   P0D
+;   pushu   PPR
+;   P1_PAGE
 ;   ;***********************
 ;   ld      P0D,#01011111b          ; modo instruzioni & read
 ;   ;***********************
-;   loop {
+;   ld     r2,#0FFh
+;   loop [r2] {
 ;      call    _display_read
-;      ifnobit   r0,#10000000b       ; controlla il BF
+;      ifbit   r0,#10000000b        ; controlla il BF
 ;         break
 ;      }
 ;   }
    delay   #20
 ;   ;***********************
+;   popu    PPR
 ;   popu    P0D
 	ret
 
@@ -1683,40 +1694,40 @@ _8880_init::
 ;***************************************
 ;****** write to MT8880 control register
 ;***************************************
-;* input: r0 1AAABBBB
-;*           xxxxdddd
+;* input: r0 1AAABBBB (1 is not forced!)
+;*          
 ;***************************************
 _8880_ctrl_wr::
-   pushu   P0D                     ; save P0D
+   pushu   P0D               ; save P0D
    pushu   r0
-   swap    r0                      ; BBBBAAAA
-   and     r0,#0xF                 ; 0000AAAA      
-   ld      r1,#RS0                 ; 00100000
+   swap    r0                ; BBBBAAAA
+   and     r0,#0xF           ; 0000AAAA      
+   ld      r1,#RS0           ; 00100000
    ld      P0D,r1
-   or      r1,#O2                  ; 10100000
+   or      r1,#O2            ; 10100000
    ld      P0D,r1
-   or      r0,r1                   ; 1010AAAA
+   or      r0,r1             ; 1010AAAA
    ld      P0D,r0
-   and     r0,#~O2                 ; 01111111
-   ld      P0D,r0                  ; 0010AAAA
+   and     r0,#~O2           ; 01111111
+   ld      P0D,r0            ; 0010AAAA
    popu    r0
-   and     r0,#15                  ; 0000BBBB
-   ld      r1,#RS0                 ; 00100000
+   and     r0,#15            ; 0000BBBB
+   ld      r1,#RS0           ; 00100000
    ld      P0D,r1
-   or      r1,#O2                  ; 10100000
+   or      r1,#O2            ; 10100000
    ld      P0D,r1
-   or      r0,r1                   ; 1010BBBB
+   or      r0,r1             ; 1010BBBB
    ld      P0D,r0
-   and     r0,#~O2                 ; 01111111
-   ld      P0D,r0                  ; 0010BBBB
+   and     r0,#~O2           ; 01111111
+   ld      P0D,r0            ; 0010BBBB
    delay   #10
-   popu    P0D                     ; restore
+   popu    P0D               ; restore
 	ret
 
 ;***************************************
 ;*********** read MT8880 status register
 ;***************************************
-;* output: r0 1AAABBBB
+;* output: r0 xxxxSSSS
 ;*
 ;***************************************
 _8880_stat_rd::
@@ -1942,7 +1953,7 @@ _frame_sample::
 ;*********** I2C bus operations on slaves
 ;****************************************
 _i2c_transfer::
-   pushu   PPR                             
+   pushu   PPR                             ; critical section begin
    spp     #0
    spi_di
    ifw [SLAVE_ABS > #255]                 
@@ -1959,6 +1970,7 @@ _i2c_transfer::
    ifbit   SLAVE_STAT,#SLAVE_READY         ; Test if bus is free
       switch [SLAVE_OP] {
          case  #READ:
+            zero     i2c_buffer,#16        ; zeros the buffer
             call     GEN_START             ; SPI and interrupt init
             ld       SPI_STAT,#TRANS_CTRL  ; Slave address
             ld       SLAVE_STAT,#READING   ; Start read condition
@@ -1978,7 +1990,7 @@ _i2c_transfer::
 
    waitbit SLAVE_STAT,#SLAVE_READY
    delay   #2300
-   popu    PPR                             
+   popu    PPR                             ; critical section end
    ret
 
 ;****************************************
@@ -2114,25 +2126,19 @@ rom_check::
    ldw     rr4,(checksum)
    sdm
    ei
-   ifw [[rr4 != #0] && [rr4 != rr2]]
+   ifw [[rr4 != #0xFFFF] && [rr4 != rr2]]
    {
       or      r0,#DIAG_ROMFAIL
    }
-aaa::
-nop
-
-   ifw [rr4 == #0]
+   ifw [rr4 == #0xFFFF]
    {
       di
       print   #line2,#msg_romck
-
-bbb::
-nop
       ldw     rr4,#line2+11
-      byte2hex r3,r7,r6
+      byte2hex r2,r7,r6
       ld      (rr4)+,r7
       ld      (rr4)+,r6
-      byte2hex r2,r7,r6
+      byte2hex r3,r7,r6
       ld      (rr4)+,r7
       ld      (rr4)+,r6
       ei
@@ -2157,7 +2163,7 @@ e2_check::
 
 
 rtc_check::
-   zero    i2c_buffer,#8
+;   zero    i2c_buffer,#8
    I2C READ,RTC_SLAVE,#0,#8
    ifbit SLAVE_STAT, #NO_ACK
      ld       RTCFLAG,#0
@@ -2166,7 +2172,7 @@ rtc_check::
    }
    if [(i2c_buffer+7) == #0x1E]
    {
-      zero i2c_buffer,#8
+;      zero i2c_buffer,#8
       ld   (i2c_buffer+0),#0x0
       ld   (i2c_buffer+1),#0x0
       ld   (i2c_buffer+2),#0x12
@@ -2189,7 +2195,7 @@ rtc_check::
 ;**************************************************************************
 
 defaults::
-   zero    i2c_buffer,#16
+;   zero    i2c_buffer,#16
    ldw     rr2,#0
    ld      r8,#(E2_SIZE / 16)
    loop [r8]
@@ -2375,6 +2381,7 @@ rtc_read::
    ldw     rr0,#i2c_buffer
    ldw     rr2,#rtc_buffer
    ld      r4,#8
+   ld      r4,#10
    loop [r4] {
       lddd    (rr2)+,(rr0)+
    }
@@ -2410,9 +2417,11 @@ rtc_start::
 
 number_read::
    pushu   r1
-   pushu   r2
+   pushuw  rr2
+   pushuw  rr4
    pushuw  rr12
    zero    number,#16
+;   zero    i2c_buffer,#16
    ldw     rr2,#8
    mul     rr2,r0
    addw    rr2,#E2_NUMERS
@@ -2437,7 +2446,8 @@ number_read::
      }
    }
    popuw   rr12
-   popu    r2
+   popuw   rr4
+   popuw   rr2
    popu    r1
    ret
 
@@ -2445,7 +2455,7 @@ number_read::
 number_write::
    pushu   r1
    pushu   r2
-   zero    i2c_buffer,#8
+;   zero    i2c_buffer,#8
    ldw     rr6,#0
    ldw     rr4,#0
    loop
@@ -2717,9 +2727,6 @@ setup_view::
                bcd2ascii r1,r1
                ld      (rr6)+,r2
                ld      (rr6),r1
-
-
-
       case #3:
       case #4:
                print   #line2, #sub_turns_2
@@ -2858,10 +2865,11 @@ setup_enter::
 event_show::
    pushuw  rr0
    pushuw  rr2
+   pushuw  rr8
    pushu   r6
    I2C  READ,E2_SLAVE,rr8,#8
    di
-   print   #line1, #event_num
+   print   #line1, #msg_num
    ldw     rr4,#line1+11
    ld      r1,EVENTS
    sub     r1,r0
@@ -2890,12 +2898,12 @@ event_show::
       ld      -(rr6),r2
       if [r3 == #2]
       {
-         ld      r8,#58
-         ld      -(rr6),r8
+         ld      r1,#58
+         ld      -(rr6),r1
       }
    }
-   ld      r8,#45
-   ld      -(rr6),r8
+   ld      r1,#45
+   ld      -(rr6),r1
    ldw     rr4,#i2c_buffer+3
    ld      r3,#3
    loop [r3]
@@ -2909,130 +2917,149 @@ event_show::
       ld      -(rr6),r2
       if [[r3 == #2] || [r3 == #3]]
       {
-         ld      r8,#47
-         ld      -(rr6),r8
+         ld      r1,#47
+         ld      -(rr6),r1
       }
    }
    ei
    popu    r6
+   popuw   rr8
    popuw   rr2
    popuw   rr0
    ret
 
-
 event_view::
    pushuw  rr0
    pushu   r2
-   .menu #3
-      .display #3, menu_preced1,      menu_preced2
-      .action #3
-                   break
-      }
-      pushu  r2
-      switch [r2]
+   ldw     rr10,rr8
+   .menu
+      if [r1 == #FORWBACK]
       {
-         case #0:
-                   ldw    rr10,rr8
-                   addw   rr10,#3
-                   I2C READ,E2_SLAVE,rr10,#4
-                   di
-                   print   #line1,#event_begin1
-                   ldw     rr6,#line1+16
-                   ldw     rr4,#i2c_buffer
-                   ld      r8,#58
-                   ld      r3,#3  
-                   loop [r3]
-                   {
-                      ld    r0,(rr4)
-                      incw  rr4
-                      byte2nibble r0,r2,r1
-                      bcd2ascii r1,r1
-                      bcd2ascii r2,r2
-                      ld    -(rr6),r1
-                      ld    -(rr6),r2
-                      if [[r3 == #2] || [r3 == #3]]
-                      {               
-                         ld    -(rr6),r8
-                      }
-                   }
-                   ei
-                   if [(i2c_buffer+4) == #EVREMOTE]
-                   {
-                      ldw    rr6,#event_remote
-                   } else {
-;                   if [(i2c_buffer+4) == #EVALARM]
-;                   {
-                      ldw    rr6,#event_alarm
-                   }
-                   print  #line2,rr6
-         case #1:
-                   ldw    rr10,rr8
-                   addw   rr10,#8
-                   I2C READ,E2_SLAVE,rr10,#4
-                   di
-                   print   #line1,#event_num1
-                   ldw     rr6,#line1+15
-                   ld      r1,(i2c_buffer)
-                   inc     r1
-                   bcd2ascii r1,r1
-                   ld      (rr6),r1
-                   print   #line2,#event_num2
-                   ldw     rr6,#line2+16
-                   ldw     rr4,#i2c_buffer+1
-                   ld      r8,#58
-                   ld      r3,#3  
-                   loop [r3]
-                   {
-                      ld    r0,(rr4)
-                      incw  rr4
-                      byte2nibble r0,r2,r1
-                      bcd2ascii r1,r1
-                      bcd2ascii r2,r2
-                      ld    -(rr6),r1
-                      ld    -(rr6),r2
-                      if [[r3 == #2] || [r3 == #3]]
-                      {               
-                         ld    -(rr6),r8
-                      }
-                   }
-                   ei
-         case #2:
-                   ldw    rr10,rr8
-                   addw   rr10,#12
-                   I2C READ,E2_SLAVE,rr10,#4
-                   di
-                   print   #line1,#event_end1
-                   ldw     rr6,#line1+16
-                   ldw     rr4,#i2c_buffer
-                   ld      r8,#58
-                   ld      r3,#3  
-                   loop [r3]
-                   {
-                      ld    r0,(rr4)
-                      incw  rr4
-                      byte2nibble r0,r2,r1
-                      bcd2ascii r1,r1
-                      bcd2ascii r2,r2
-                      ld    -(rr6),r1
-                      ld    -(rr6),r2
-                      if [[r3 == #2] || [r3 == #3]]
-                      {               
-                         ld    -(rr6),r8
-                      }
-                   }
-                   ei
-                   if [(i2c_buffer+4) == #EVRESET]
-                   {
-                      ldw    rr6,#event_reset
-                   } else {
-;                   if [(i2c_buffer+4) == #EVDIGIT]
-;                   {
-                      ldw    rr6,#event_digit
-                   }
-                   print   #line2,rr6
+         inc     r2
+         ifw [rr10 == rr8]
+         {
+            addw    rr10,#8
+         } else {
+            addw    rr10,#5
+         }
       }
-      popu   r2
+      if [r1 == #CONFIRM]
+      {
+         break
+      }
+;      zero    i2c_buffer,#16
+      I2C READ,E2_SLAVE,rr10,#10
+      ld      r0,(i2c_buffer)
+      if [[r0 != #EVCALL] && [r0 != #EVREPLY] && [r0 != #EVEND]]
+      {
+         ldw     rr10,rr8
+         ld      r2,#0
+      }
+      if [r2 == #0]
+      {
+         I2C READ,E2_SLAVE,rr8,#8
+         di
+         print   #line1,#msg_evstart
+         timeto  line1+16,i2c_buffer+5
+         ei
+         ld      r12,(i2c_buffer+7)
+         switch [r12]
+         {
+            case #ALEXTERNAL:
+                              ldw    rr6,#msg_evexternal
+            case #ALREMOTE:
+                              ldw    rr6,#msg_evremote
+            case #ALOUTGOING:
+                              ldw    rr6,#msg_evoutgoing
+            case #ALINCOMING:
+                              ldw    rr6,#msg_evincoming
+         }
+         print  #line2,rr6
+      }
+      if [[r0 == #EVCALL] && [r2 > #0]]
+      {
+         pushu   r2
+         .menu   #2
+            if [r2 == #0]
+            {
+               print   #line1,#msg_evnum
+               pushu   r0
+               ld      r0,(i2c_buffer+4)
+               call    number_read
+               popu    r0
+               di
+               blank   line2
+               ldw     rr6,#line2
+               ldw     rr4,#number
+               loop 
+               {
+                  ld      r3,(rr4)+
+                  bcd2ascii r3,r12
+                  ld      (rr6)+,r12
+                  if [r3 == #0]
+                  {
+                     ld      r12,#32
+                     ld      -(rr6),r12
+                     break
+                  }
+               }
+               ei
+            }
+            if [r2 == #1]
+            {
+;               zero    i2c_buffer,#16
+               I2C READ,E2_SLAVE,rr10,#10
+               di
+               print   #line1,#msg_evnumtime
+               timeto  line1+15,i2c_buffer+2
+               ei
+               if [(i2c_buffer+5) == #EVREPLY]
+               {
+                  print #line2,#msg_evnumreply
+               } else {
+                  print #line2,#msg_evnumnoreply
+               }
+            }
+            if [r2 == #2]
+            {
+               ld    DIGIT,#FORWBACK
+               break
+            }
+            if [r1 == #CONFIRM]
+            {
+               ld    DIGIT,#CONFIRM
+               break
+            }
+         .endmenu
+         popu    r2
+      }
+      if [[r0 == #EVREPLY] && [r2 > #0]]
+      {
+         di
+         print   #msg_evreply,#msg_evnumtime
+         timeto  line2+15,i2c_buffer+2
+         ei
+      }
+      if [[r0 == #EVEND] && [r2 > #0]]
+      {
+         di
+         print   #line1,#msg_evend
+         timeto  line1+16,i2c_buffer+2
+         ei
+         ld      r3,(i2c_buffer+4)
+         switch [r3]
+         {
+            case #STRESET:
+                              ldw    rr6,#msg_evreset
+            case #STPHONE:
+                              ldw    rr6,#msg_evphone
+            case #STENDCYCLE:
+                              ldw    rr6,#msg_evendcycle
+         }
+         print  #line2,rr6
+      }
    .endmenu
+
    popu    r2
    popuw   rr0
    ret
@@ -3116,35 +3143,37 @@ event_begin::
    popuw   rr0
    ret
 
-event_number::
+event_call::
    if [RTCFLAG == #0]
    {
       ret
    }
    pushuw  rr0
    pushuw  rr2
-   call    rtc_read
-   ldw     rr6,#i2c_buffer
-   ld      (rr6),#EVCALL
-   incw    rr6
-   ld      (rr6),r0
-   incw    rr6
-   ldw     rr2,#rtc_buffer
-   lddd    (rr6)+,(rr2)+
-   lddd    (rr6)+,(rr2)+
-   lddd    (rr6)+,(rr2)+
-   ld      r0,#0
-   call    event_set
-   ld      r0,#0
-   ld      r1,EVIDX
-   addw    rr8,rr0
-   I2C WRITE,E2_SLAVE,rr8,#5
-   add     EVIDX,#5
+   if [LASTNUM != r0]
+   {
+      call    rtc_read
+      ldw     rr6,#i2c_buffer
+      ld      (rr6),#EVCALL
+      incw    rr6
+      ldw     rr2,#rtc_buffer
+      lddd    (rr6)+,(rr2)+
+      lddd    (rr6)+,(rr2)+
+      lddd    (rr6)+,(rr2)+
+      ld      (rr6),r0
+      ld      r0,#0
+      call    event_set
+      ld      r0,#0
+      ld      r1,EVIDX
+      addw    rr8,rr0
+      I2C WRITE,E2_SLAVE,rr8,#5
+      add     EVIDX,#5
+   }
    popuw   rr2
    popuw   rr0
    ret
 
-event_replay::
+event_reply::
    if [RTCFLAG == #0]
    {
       ret
@@ -3153,14 +3182,16 @@ event_replay::
    pushuw  rr2
    call    rtc_read
    ldw     rr6,#i2c_buffer
-   ld      (rr6),#EVREPLAY
-   incw    rr6
-   ld      (rr6),r0
+   ld      (rr6),#EVREPLY
    incw    rr6
    ldw     rr2,#rtc_buffer
    lddd    (rr6)+,(rr2)+
    lddd    (rr6)+,(rr2)+
    lddd    (rr6)+,(rr2)+
+
+   ; r0 = (numero di cicli - r13) * (numero di ripetizioni - r12)
+
+   ld      (rr6),r0
    ld      r0,#0
    call    event_set
    ld      r0,#0
@@ -3380,6 +3411,8 @@ _print::
    popuw   rr0
    ret
 
+
+
 ;**************************************************************************
 ;************************** Dati statici in rom ***************************
 ;**************************************************************************
@@ -3401,7 +3434,7 @@ message_ready:          .ascii  "Telesoccorso DGE"
 message_time:           .ascii  "    ##:##:##    "
 message_alarm:          .ascii  "Allarme in corso"
 message_alrem:          .ascii  "dal telecomando!"
-message_alring:         .ascii  "chiamata entran."
+message_alring:         .ascii  "nessuno risponde"
 message_altrig:         .ascii  "  dal pulsante  "
 message_alout:          .ascii  "numero non comp."
 message_break:          .ascii  "   ANNULLATO    "
@@ -3416,7 +3449,7 @@ msg_e2fail:             .ascii  "E2 non risponde!"
 msg_e2ok:               .ascii  "Checksum E2:  Ok"
 msg_empty1:             .ascii  "Prima accensione"
 msg_empty2:             .ascii  "caricato default"
-msg_rtcfail:            .ascii  "RTC non rilevato"
+msg_rtcfail:            .ascii  "RTC non risponde"
 msg_rtcok:              .ascii  "Checksum RTC: Ok"
 msg_rtcno:              .ascii  "(no reg. eventi)"
 msg_8880fail:           .ascii  "Registri MT8880!"
@@ -3506,34 +3539,47 @@ malvenuto:              .ascii  "Guarda i numeri:"
 telesoccorso:           .ascii  "Il telesoccorso:"
 telecomando:            .ascii  "Il telecomando: "
 
+msg_reply1:             .ascii  "Conversazione in"
+msg_reply2:             .ascii  "corso con utente"
+msg_telbusy:            .ascii  " LINEA OCCUPATA "
+msg_pause:              .ascii  "Pausa in corso.."
+msg_noconf:             .ascii  " SENZA RISPOSTA "
+
 msgtony:                .ascii  "Linea telefonica"
 msgoccupato:            .ascii  "    OCCUPATA    "
 msglibero:              .ascii  "     LIBERA     "
 msgpbx:                 .ascii  "   PBX LIBERO   "
 msghiz:                 .ascii  " ALTA IMPEDENZA "
 
-event_num:              .ascii  "   Evento  ##:  "
-event_date:             .ascii  "    ##/##/##    "
+msg_num:                .ascii  "   Evento  ##:  "
+msg_date:               .ascii  "    ##/##/##    "
 
-event_begin1:           .ascii  "Inizio: ##:##:##"
-event_remote:           .ascii  "con telecomando "
-event_alarm:            .ascii  "con allarme est."
+msg_evstart:            .ascii  "Inizio ore ##:##"
+msg_evremote:           .ascii  "via telecomando "
+msg_evexternal:         .ascii  "via allarme est."
+msg_evoutgoing:         .ascii  "con chiam. usc. "
+msg_evincoming:         .ascii  "con chiam. entr."
 
-event_end1:             .ascii  "Fine:   ##:##:##"
-event_reset:            .ascii  " con reset man. "
-event_digit:            .ascii  "con reset remot."
+msg_evend:              .ascii  "Fine ore:  ##:##"
+msg_evreset:            .ascii  "con tasto reset "
+msg_evphone:            .ascii  "con reset remoto"
+msg_evendcycle:         .ascii  "a termine ciclo "
              
-event_num1:             .ascii  "Chiamata del N.#"
-event_num2:             .ascii  "alle:   ##:##:##"
+msg_evnum:              .ascii  " Chiamata del N "
+msg_evnumtime:          .ascii  " alle ore ##:## "
+msg_evnumreply:         .ascii  "  con risposta  "
+msg_evnumnoreply:       .ascii  " senza risposta "
+msg_evreply:            .ascii  "    avvenuta    "
+
 
 ;**************************************************************************
 ;************************* Fine ROM - Checksum ****************************
 ;**************************************************************************
 
 ;                        .org    (ROMSIZE - 8)
-pattern::               .byte   055h,0AAh
+pattern::               .byte   0x55,0xAA
 serial::                .byte   1,0,0,0
-checksum::              .byte   0xFF,0xDF
+checksum::              .byte   0xFF,0xFF
 
 
 ;**************************************************************************
@@ -3561,4 +3607,4 @@ display_buffer::
 line1::                 .blkb   16              ; display buffer of 32 char
 line2::                 .blkb   16
 
-tempinput::             .blkb   4
+tempinput::             .blkb   16              ; temporary input datas

@@ -36,26 +36,6 @@
    ldw     RR94,#0
    .endc
    call    _print
-;   pushuw  rr0
-;   pushuw  rr2
-;   pushu   r4
-;   ldw     rr0,#where
-;   ldw     rr2,msg1
-;   ld      r4,#16
-;   loop [r4] {
-;      lddp (rr0)+,(rr2)+
-;   }
-;   .ifc nb msg2
-;   ldw     rr2,msg2
-;   ld      r4,#16
-;   loop [r4] {
-;      lddp (rr0)+,(rr2)+
-;   }
-;   .endc
-;   popu    r4
-;   popuw   rr2
-;   popuw   rr0
-;   ret
 .endm
 ;************************
 .macro .menu maxmenu
@@ -73,10 +53,6 @@
          }
       }
       .endc
-.endm
-;************************
-.macro .next
-      inc      r2
 .endm
 ;************************
 .macro .display num,text1,text2,funct
