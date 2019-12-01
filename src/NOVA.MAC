@@ -208,18 +208,20 @@
 .endm
 ;************************
 .macro i2c opr,slave,addr,lenght
+   pushuw rr0
    ld    I2C_OP,#opr
    ld    SLAVE_W,#slave
-   ld    rr0,#addr
-   ld    LENGHT,#lenght
-   ifw [I2C_ADDR > #255]                 
-   {                                     
-      and   r0,#00000111b
-      ror   r0
-      or    SLAVE_W,r0
-   }
+   ldw   rr0,addr
+   ld    LENGHT,lenght
+;   ifw [rr0 > #255]                 
+;   {                                     
+;      and   r0,#00000111b
+;      rol   r0
+;      or    SLAVE_W,r0
+;   }
    ld    I2C_ADDR,r1
    call  i2c_bus
+   popuw   rr0
 .endm
 ;************************
 .macro bcd2ascii bcd,ascii
