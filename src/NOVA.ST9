@@ -24,16 +24,10 @@
 ;*                                                                        *
 ;**************************************************************************
 
-
-
-
-.title          "TS firmware"
-.pl             66                      ; number of lines per page
-.list           me                      ; enable macro expansion control
-.page
-
-
-
+                        .title          "TS firmware"
+                        .pl             66      
+                        .list           me      
+                        .page
 
 ;***************************************
 ;*********************** Include section
@@ -48,7 +42,7 @@
 .include    "\st9\include\page_0.inc"    ; Page 0 register
 .include    "\st9\include\io_port.inc"   ; I/O port register
 .include    "\st9\include\mftimer.inc"   ; MF Timer register
-.include    "\st9\include\ad_c.inc"      ; A/D converter register
+;.include    "\st9\include\ad_c.inc"      ; A/D converter register
 .include    "\st9\include\sci.inc"       ; SCI register
 .include    "\st9\include\bitmacro.inc"  ; BIT macros
 .list
@@ -77,7 +71,8 @@ SCI_IVR         = 040h                  ; Start SCI int vector
 EXT_IVR         = 050h                  ; External interrupt base vector
 MFT_IVR         = 0C0h                  ; Multifunction timer int vector
 START           = 100h                  ; Start of C startup code
-SDATA           = 3000h                 ; Static data start
+ROMDATA         = 3000h                 ; Static data start
+ROMSIZE         = 4000h                 ; ROM size
 
 REMOTE_TEST     = 0101010001010000b     ; Test pattern for remote
 
@@ -184,8 +179,8 @@ TONEBUSY        = 3
 ;**************
 DISP_C  := R142                         ; 
 DISP_F  := R141                         ; 
-;        := R140                         ;
-DIGIT_R := R139                         ;
+RTCFLAG := R140                         ;
+;       := R139                         ;
 SWITCH  := R138                         ;  
 ALARM   := R137                         ; 
 RING_C  := R136                         ;
@@ -247,12 +242,10 @@ I2C_BUFF == 94
 TOT_LENGHT := RR78
 SLAVE_W    :=  R77                      ; Write slave control byte
 SLAVE_R    :=  R76                      ; Read slave control byte
-
-COUNTER    := RR70                      ; Bytes already transferred.
-counter    :=  rr6
+COUNTER    := RR72                      ; Bytes already transferred.
+counter    :=  rr8
 LENGHT     := RR70                      ; Number of bytes to be transfert.
 lenght     :=  rr6
-
 I2C_SLAVE  :=  R69                      ; Slave control byte.
 SPI_STAT   :=  R68                      ; SPI transfer status.
 SLAVE_STAT :=  R67                      ; Slave status.
@@ -308,7 +301,7 @@ buffer     :=  r0
 ;***********************
 
 E2_SLAVE     == 10100000b           ; EEPROM I2C slave control byte
-RTC_SLAVE    == 11010000b           ; Real Time Clock I2C slave control byte
+RTC_SLAVE    == 11010000b           ; Real Time + I2C slave control byte
 
 READ         == 1                   ; Read mode
 WRITE        == 2                   ; Write mode
@@ -319,10 +312,9 @@ TRANS_ADDR   == 2                   ; The slave address transferred
 TRANS_DWR    == 3                   ; The data has been transmitted
 TRANS_DRD    == 4                   ; The data has been received
 
-EEP_OK       == 0                   ; Slave is OK.
-LECT_ON      == 1                   ; Slave is reading a byte.
-VERIF_ON     == 2                   ; Slave is reading the current byte.
-ECR_ON       == 3                   ; Slave is programming a byte.
+READING      == 1                   ; Slave is reading a byte.
+VERIFYING    == 2                   ; Slave is reading the current byte.
+WRITING      == 3                   ; Slave is programming a byte.
 NO_ACK       == 4                   ; Slave has not acknowledged.
 
 SLAVE_READY  == 80h                 ; Slave is ready for a new operation...
@@ -332,7 +324,7 @@ SLAVE_READY  == 80h                 ; Slave is ready for a new operation...
 ;**************************************************************************
 ;************************ TS INITIALIZATIONS CODE  ************************
 ;**************************************************************************
-   .text                                   ; Start program segment
+                        .text  
 
 
 ;***************************************
@@ -373,7 +365,7 @@ SLAVE_READY  == 80h                 ; Slave is ready for a new operation...
 ;***************************************
 ;************ Linker options entry point
 ;***************************************
-   .org    START                                ; Start code
+                        .org    START
 	;***********************        
 st9$entryRS::                                   ; Entry point for Separate 
    sdm                                          ; Read Only Environment -iI
@@ -400,7 +392,8 @@ st9$entry_GO::                                  ;
    ld      moder,#(sspm | uspm | div2m)    ; Set USP,SSP in int reg - Ck/2
    ld      usplr,#(USTACK)                 ; Init User stack pointer
    ld      ssplr,#(SSTACK)                 ; Init System stack pointer
-   ld      cicr,#(gcenm | iamm | cplm)     ; CPL=7,DI,enable counter,nested 
+;   ld      cicr,#(gcenm | iamm | cplm)     ; CPL=7,enable counter,nested 
+   ld      cicr,#(gcenm | cplm)            ; CPL=7,enable counter,concurrent
    and     flagr,#03h                      ; Clr flag register
 
    srp     #(15*2)                         ; Set bank register F
@@ -451,7 +444,10 @@ st9$entry_GO::                                  ;
    ld      eimr,#00000001b                 ; Unmask interrupts
    ld      eitr,#10001101b                 ; Set int triggers
    ld      eivr,#01010100b                 ; Set int_vect=5X / NMI
-   ld      eiplr,#01100100b                ; Interrups priority (A-D-BC)
+;   ld      eiplr,#10100100b                ; Interrups priority (A-D-BC)
+   ld      eiplr,#00101001b                ; Interrups priority (D-A-BC)
+;   ld      eiplr,#01101000b                ; Interrups priority (D-A-BC)
+
 ;  clr     nicr                            ; NMI TLI disabled   
 ;////////////////////// per usare emulatore ////////////////
    ld      nicr,#tlnmm                     ; NMI TLI enabled
@@ -516,26 +512,50 @@ init::
 
 	call    display_init
 	call    _8880_init
+
    clr     EIPR
 ;   nop
 
    ei
 ;jx i2c_test
 
+diagnose::
+   print   line1, message_diag
+   call    rom_check
+   if [r0 == #1]
+   {
+      print   line2, msg_romfail
+   } else {
+      print   line2, msg_romok
+   }
+   sleep   #1000
+   call    e2_check
+   if [r0 == #1]
+   {
+      print   line2, msg_e2fail
+   } else {
+      print   line2, msg_e2ok
+   }
+   sleep   #1000
 
+   call    clock_start
 
-open::
-
-   print   line1, message_open
-   print   line2, message_name
-   sleep   #1500
+   call    rtc_check
+   if [r0 == #1]
+   {
+      print   line2, msg_rtcfail
+   } else {
+      print   line2, msg_rtcok
+   }
+   sleep   #1000
 
    call    display_bufclr
 
-;   jx tony
-;   jx zeppo
 
-   and     P5DR ,#~00110001b
+;   jx tony
+;   jx pino
+
+;   and     P5DR ,#~00110001b
 ;   or      P5DR ,#00000001b
 
 idle::
@@ -543,14 +563,15 @@ idle::
    ldw     rr0,#frame_buffer            ; loads the frame buffer
    ldw     (rr0),#0                     ; zero the buffer
    ld      ALARM,#0
-   ld      DIGIT_R,#0
    ld      HOOK,#0
    ld      SWITCH,#0
    ld      TONE_0,#255
-   or      EIMR,#10000000b
+   remote_ei
+   _8880_di
+
    relay1  off
    relay2  off
-
+   
    print   line1, message_ready
    print   line2, message_time
 
@@ -578,6 +599,9 @@ main::
    }
 
 allarme::
+
+   remote_di
+   and     EIMR,#~11110000b
 
    print   line1, message_alarm
 ;   sleep   #1000
@@ -638,7 +662,6 @@ allarme::
    call    _8880_ctrl_wr
 
 ;      ld      r4,#6
-      ld      DIGIT_R,#255
       ld      DIGIT,#0
       while [DIGIT != #5] {
          call    reset_message
@@ -650,7 +673,6 @@ allarme::
             jx       annullamento
          }
       }
-      ld      DIGIT_R,#0
 ;  }
    ld      r0,#DTMFTONE
    call    _8880_ctrl_wr
@@ -694,7 +716,12 @@ hook::
    jx      hook
 
 
-progr::    
+progr::
+
+   _8880_ei
+   and     EIMR,#~11110000b
+   and     EIPR,#00001111b
+
    print   line1, message_progst
    print   line2, message_tastibegin
    relay1  on
@@ -705,7 +732,6 @@ progr::
    ld      r0,#0000b
    call    _8880_ctrl_wr
 
-   ld      DIGIT_R,#255
 
 ;   ld      r0,#80
 ;   loop [r0]
@@ -875,6 +901,8 @@ prog_numeri::
    ldw     rr10,#numero
    ld      (rr10),#0
 
+   zero  numero,#16
+
    loop {
       ld      r1,DIGIT
       clr     DIGIT
@@ -882,12 +910,20 @@ prog_numeri::
       if [r1 != #0]
       {
          bcd2ascii  r1,r9
-         if [r8 <= #15]
+         if [[r8 <= #15] && [r1 <= #10]]
          {
            ld      (rr6)+,r9
            ld      (rr10)+,r1
            inc     r8
          }
+      }
+      if [[r1 == #11] && [r8 >= #0]]
+      {
+         ld      r1,#0
+         ld      r9,#32 
+         ld      -(rr6),r9
+         ld      -(rr10),r1
+         dec     r8
       }
       if [r1 == #12]
       {
@@ -898,14 +934,25 @@ prog_numeri::
    }
    if [(numero) != #0]
    {
-
-     ldw     rr6,#i2c_buffer
-     ldw     rr10,#numero
-     loop [r8] {
-        lddd (rr6)+,(rr10)+
+     zero  i2c_buffer,#8
+     ldw     rr6,#0
+     ldw     rr4,#0
+     loop [r8]
+     {
+        ld      r1,numero(rr4)
+        incw    rr4
+        ld      r2,numero(rr4)
+        incw    rr4
+        bcd2byte r1,r2,r3
+        ld      i2c_buffer(rr6),r3
+        incw    rr6
+        if [[r1 == #0] || [r2 == #0]]
+        {
+           break
+        }
      }
-
-;     i2c WRITE, E2_SLAVE, #0, r8
+     zeppillo::
+     I2C WRITE, E2_SLAVE, #0, #8
    }
    ret
 
@@ -922,11 +969,10 @@ zeppo::
 	;call     att_viva_voce
 
 ;jx xyz
-   set_bit P5DR,REL1       ;on hook
-   set_bit P5DR,REL2       
-   delay   #60000
-	delay   #60000
-	
+
+;   relay1 on
+;   relay2 on
+
 eee::        
 	
 ;  or      EIMR,#(ALARM1 | ALARM2 | ALARM3 | ALARM4)
@@ -1075,8 +1121,8 @@ pino::
 
 peppo::        
 
-   and     P5DR ,#~00000001b
-   and     P5DR ,#~00110000b
+;   and     P5DR ,#~00000001b
+;   and     P5DR ,#~00110000b
 
 	
 	loop {
@@ -1121,10 +1167,6 @@ peppo::
 	   }
 	}
 
-	call    _8880_scancp
-	switch [r0] {
-	   default:
-	}
 	
 stop::
 	jx      stop
@@ -1199,16 +1241,16 @@ i2c_test::
      ld SLAVE_STAT,#SLAVE_READY
      pushu EIMR
 
-;     ldw     rr6,#i2c_buffer
-;     ldw     rr10,#num2
-;     ld      r8,#4
-;     loop [r8] {
-;        lddp (rr6)+,(rr10)+
-;     }
+     ldw     rr6,#i2c_buffer
+     ldw     rr10,#num2
+     ld      r8,#4
+     loop [r8] {
+        lddp (rr6)+,(rr10)+
+     }
 
      and   EIMR,#00000000b
 
-     i2c READ, RTC_SLAVE, #0, #4
+     I2C WRITE, RTC_SLAVE, #0, #4
 
      clr   EIPR
      popu  EIMR
@@ -1365,10 +1407,12 @@ _A0_int::
    pushuw  RPP                             ; Save RPP
    srp     #(2*2)                          ; Switch context
    spp     #0
-   clr     EIPR                            ; clear pending interrupts
-   nop
-   pushu   EIMR
-   clr     EIMR                            ; disable all interrupts
+   ;clr     EIPR                            ; clear pending interrupts
+   ;nop
+   ;pushu   EIMR
+   ;clr     EIMR                            ; disable all interrupts
+   and     EIPR,#~ipa0m
+
    ;***********************
    call    display_update                  ; resfresh display
 	;***********************
@@ -1417,20 +1461,11 @@ _A0_int::
       inc     TONE_0
    }
    ;***********************
-   if [DIGIT_R == #255]
-   {
-      call    _8880_ctrl_rd                ; see if valid dtmf has been
-      ifbit   r0,#0100b                    ; received from the MT8880
-;         delay   #8000
-         call    _8880_data_rd
-         ld      DIGIT,r0
-      }
-   }
-   ;***********************
-   spp     #0
-   clr     EIPR                            ; WD generate spurious
-   nop
-   popu    EIMR                            ; re-enable all interrupts
+   ;spp     #0
+   ;clr     EIPR                            ; WD generate spurious
+   ;nop
+   ;popu    EIMR                            ; re-enable all interrupts
+
    popuw   RPP                             ; Restore context
    popu    PPR
 	iret
@@ -1439,13 +1474,11 @@ _A0_int::
 ;**************************** MT8880 IRQ
 ;***************************************
 _A1_int::
-   iret
    pushu   PPR
    pushuw  RPP
    srp     #(3*2)
    spp     #0
-   clr     EIPR
-   nop
+   and     EIPR,#~ipa1m
 
    delay   #8000
    call    _8880_ctrl_rd
@@ -1455,7 +1488,9 @@ _A1_int::
       ld      DIGIT,r0
 	}
    delay   #8000
-   ld      r0,#DTMFINOUT
+   ld      r0,#1100b
+	call    _8880_ctrl_wr
+   ld      r0,#0000b
 	call    _8880_ctrl_wr
 
    popuw   RPP
@@ -1471,19 +1506,16 @@ _B0_int::
    pushuw  RPP
    srp     #(4*2)
    spp     #0
-   if [SPI_STAT == #TRANS_DRD]           
+   if [SPI_STAT == #TRANS_DRD]
    {
       ld    buffer,SPIDR         
+;      ld    i2c_buffer(lenght),buffer
 
-      ld    i2c_buffer(lenght),buffer
+      ld    i2c_buffer(counter),buffer
+      incw  counter
+
       decw  lenght
       if    [SETZ]
-
-;      ld    i2c_buffer(counter),buffer
-;      incw  counter
-;      if    [counter > lenght]
-
-
       {
          call  GEN_STOP   
          ld    SLAVE_STAT,#SLAVE_READY 
@@ -1502,7 +1534,7 @@ _B0_int::
 		} else {
          switch [SPI_STAT] {
          case  #TRANS_CTRL:
-            if [SLAVE_STAT == #VERIF_ON]
+            if [SLAVE_STAT == #VERIFYING]
             {
                ld    SPI_STAT,#TRANS_DRD
                spp   #0
@@ -1518,21 +1550,26 @@ _B0_int::
                call  GEN_START   
                ld    SPI_STAT,#TRANS_CTRL
                ld    buffer,SLAVE_R
-               ld    SLAVE_STAT,#VERIF_ON  
+               ld    SLAVE_STAT,#VERIFYING  
 				} else {
 					spp	#0
                ld    SPI_STAT,#TRANS_DWR
-               ld    buffer,i2c_buffer(lenght)
+;               ld    buffer,i2c_buffer(lenght)
+               ld    buffer,i2c_buffer(counter)
             } 
          case  #TRANS_DWR:
 				spp	#0
+
+            incw  counter
+   
             decw  lenght  
             if    [CLZ]
             {
-               ld    buffer,i2c_buffer(lenght)
+;               ld    buffer,i2c_buffer(lenght)
+               ld    buffer,i2c_buffer(counter)
             } else {  
-               call  T0_I2C
-               call  GEN_STOP 
+               call  GEN_STOP
+               or    SLAVE_STAT,#SLAVE_READY   
             } 
          }
       }
@@ -1563,8 +1600,7 @@ _D1_int::
 	pushw   RPP                             ; Save RPP
    srp     #(3*2)                          ; Switch context
    spp     #0
-   clr     EIPR
-   nop
+   and     EIPR,#~ipd1m
    delay   #30
    ifbit P2DR,#REMOTE                      ; Is here a level 1
       delay   #100
@@ -1776,77 +1812,6 @@ _display_ready::
 
 
 ;**************************************************************************
-;******************************** EEPROM **********************************       
-;**************************************************************************
-
-
-
-;***************************************
-;*************** Write data to EEPROM #1
-;***************************************
-wr_data_to_E1::
-;  set_CSE1
-	ld      r0,#1b
-	rdwr_data_to_SPI
-	ld      r0,#01000000b
-	rdwr_data_to_SPI
-	ld      r0,#55h
-	rdwr_data_to_SPI
-;  rst_CSE1
-	ret
-
-
-
-;***************************************
-;*************** Read data to EEPROM #1
-;***************************************
-rd_data_from_E1::
-;  set_CSE1
-	ld      r0,#1b
-	rdwr_data_to_SPI
-	ld      r0,#10000000b
-	rdwr_data_to_SPI
-	ld      r0,#00h
-	rdwr_data_to_SPI
-;  rst_CSE1
-	ret
-
-
-
-;**************************************************************************
-;******************************** DRIVER **********************************       
-;**************************************************************************
-
-;****************************************
-;*************** LEDs *******************
-;****************************************
-
-FlashLed::
-;  spp     #0
-;  srp     #0
-	loop [r1] {
-	   call    LedOn
-      sleep   #200
-	   call    LedOff
-      sleep   #200
-	   cpl     r0
-	}
-	ret
-
-LedOff::
-	cpl     r0
-	and     P2DR,r0
-;  clr_bit  P2DR,r0
-	ret
-
-
-LedOn::
-	or      P2DR,r0
-;  set_bit  P2DR,r0
-	ret
-
-
-;**************************************************************************
 ;******************  Composizione numeri telefonici  **********************
 ;**************************************************************************
 				    
@@ -2015,40 +1980,46 @@ _8880_pwd::
 	ret
 
 
-;****************************************
-;********** scan for call progress tones
-;****************************************
-_8880_scancp::
-	ld      r0,#DTMFTONE
-	call    _8880_ctrl_wr
-	
-	ret
-	
+;**************************************************************************
+;****************** Attivazione/disattivazione vivavoce *******************
+;**************************************************************************
+
 
 ;****************************************
 ;****************** Attivazione VIVA VOCE
 ;****************************************
-att_viva_voce::
-	pushu   PPR
+proc vivavoce_on [PPR]
+{
 	spp     #P7D_PG
-	ld      r0,P7DR
-   or      r0,#(PD118 | PD119)     ; attiva MC34118 e MC34119
-	ld      P7DR,r0
-	popu    PPR
-	ret
+   or      P7DR,#(PD118 | PD119)     ; attiva MC34118 e MC34119
+}
 
 
 ;****************************************
 ;*************** Disattivazione VIVA VOCE
 ;****************************************
-disatt_viva_voce::
-	pushu   PPR
+proc vivavoce_off [PPR]
+{
 	spp     #P7D_PG
-	ld      r0,P7DR
-   and     r0,#~(PD118 | PD119)    ; disattiva MC34118 e MC34119
-	ld      P7DR,r0
-	popu    PPR
-	ret
+   and     P7DR,#~(PD118 | PD119)    ; disattiva MC34118 e MC34119
+}
+
+;****************************************
+;*************** Disattivazione VIVA VOCE
+;****************************************
+proc mute_on [PPR]
+{
+   or      P5DR,#MUTE                ; attiva muting MC34118
+}
+
+;****************************************
+;*************** Disattivazione VIVA VOCE
+;****************************************
+proc mute_off [PPR]
+{
+   and     P5DR,#~(MUTE)             ; disattiva muting MC34118
+}
+
 
 ;**************************************************************************
 ;****************** Sezione messaggistica vocale **************************
@@ -2235,6 +2206,7 @@ _frame_sample::
       ld         (rr0),r4                  ; put shift reg into buffer
       incw       rr0                       ; increment buffer pointer
 	}
+                                           ; time critical section end
 	ret
 
 
@@ -2248,10 +2220,9 @@ _frame_sample::
 
 proc T0_I2C [PPR]
 {
-stoppo::
 	spp     #T0C_PG                         ; Set timer0 control page
    ld      T0_IVR,#MFT_IVR                 ; Set int vector
-   ld      T0_IDCR,#00000010b              ; Set timer0 int level=x
+   ld      T0_IDCR,#00000001b              ; Set timer0 int level=x
 
 	spp     #T0D_PG                         ; Set timer0 data page
    ld      T_TCR,  #00000000b              ; Set timer control reg
@@ -2262,7 +2233,7 @@ stoppo::
    ldw     T_REG0R,#5000                   ; 5 msec counter value
    decw    TOT_LENGHT
    while [CLZ] {
-      addw    T_REG0R,#5000                ; 5 ms multiplied num. of bytes
+      addw    T_REG0R,#5000                ; 5 ms multiplied lenght
       decw    TOT_LENGHT
 	}	
    or      T_TCR,  #cen                    ; Start the timer0
@@ -2272,31 +2243,30 @@ stoppo::
 ;****************************************
 ;*********** I2C bus operations on slaves
 ;****************************************
-
-proc i2c_bus [PPR]
+proc i2c_transfer [PPR]
 {
-i2cb::
    spp   #0
    spi_di
    ld    SLAVE_R,SLAVE_W                   ; Slave read/write slave
    or    SLAVE_R,#1
    ldw   TOT_LENGHT,LENGHT                 ; Save LENGHT before decrement.
+   ldw   COUNTER,#0
    ifbit SLAVE_STAT,#SLAVE_READY           ; Test if bus is free
       switch [SLAVE_OP] {
          case  #READ:
             call     GEN_START             ; SPI and interrupt init
             ld       SPI_STAT,#TRANS_CTRL  ; Slave address
-            ld       SLAVE_STAT,#LECT_ON   ; Start read condition
+            ld       SLAVE_STAT,#READING   ; Start read condition
             ld       SPIDR,SLAVE_W         ; write mode address
          case  #VERIFY:
             call     GEN_START             ; SPI and interrupt init
             ld       SPI_STAT,#TRANS_CTRL  ; Slave address
-            ld       SLAVE_STAT,#VERIF_ON  ; Start verify condition
+            ld       SLAVE_STAT,#VERIFYING ; Start verify condition
             ld       SPIDR,SLAVE_R         ; read mode address
          case  #WRITE:
             call     GEN_START             ; SPI and interrupt init
             ld       SPI_STAT,#TRANS_CTRL  ; Slave address
-            ld       SLAVE_STAT,#ECR_ON    ; Start write condition
+            ld       SLAVE_STAT,#WRITING   ; Start write condition
             ld       SPIDR,SLAVE_W         ; write mode address
       }
    }
@@ -2374,35 +2344,73 @@ proc TEST_ACK [PPR]
 ;***************************** Routines varie *****************************
 ;**************************************************************************
 
-proc clock [PPR,r0,r1,r2,r3,r4,r5,r6,r7]
+proc clock [r0,r1,r2,r3,r4,r5,r6,r7,r8]
 {
-   i2c     READ,RTC_SLAVE,#0,#4
+   I2C     READ,RTC_SLAVE,#0,#4
 
-   ldw     rr6,#0
-   ldw     rr4,#15
-   loopw [rr4] {
-      ifw [line2(rr4) == #2323h]
+   ldw     rr6,#12
+   ldw     rr4,#0
+   ld      r8,#58
+   ld      r3,#3
+   loop [r3] {
+      ld    r0,i2c_buffer(rr4)
+      incw  rr4
+      byte2bcd r0,r2,r1
+      bcd2ascii r1,r1
+      bcd2ascii r2,r2
+      if [r3 <= 2]
       {
-         ld    r0,i2c_buffer(rr6)
-         incw  rr6
-
-cicco::
-         byte2bcd r0,r2,r1
-
-         bcd2ascii r1,r1
-         bcd2ascii r2,r2
-         ld    line2+1(rr4),r1
-         ld    line2(rr4),r2
+         ld    line2+2(rr6),r8
       }
+      ld    line2+1(rr6),r1
+      ld    line2(rr6),r2
+      subw  rr6,#3
    }
+
 }
+
+proc clock_start [r0,r1,r2,r3]
+{
+   I2C READ,RTC_SLAVE,#0,#1
+;   if [(i2c_buffer) == #0D0h]
+;   {
+      or  (i2c_buffer),#80h
+      I2C WRITE,RTC_SLAVE,#0,#1
+      and (i2c_buffer),#~80h
+      I2C WRITE,RTC_SLAVE,#0,#1
+;      or  (i2c_buffer),#80h
+;      I2C WRITE,RTC_SLAVE,#0,#1
+;   }
+}
+
+proc clock_menu [r0,r1,r2,r3]
+{
+}
+
+proc rom_check [r1,r2,r3]
+{
+   ld r0,#1
+}
+
+proc e2_check [r1,r2,r3]
+{
+}
+
+proc e2_update [r1,r2,r3]
+{
+}
+
+proc rtc_check [r1,r2,r3]
+{
+}
+
 
 ;**************************************************************************
 ;************************** Dati statici in rom ***************************
 ;**************************************************************************
 
-;                        .org    SDATA
-id::                    .asciz  "TS FW.05B Tuccia"
+                        .org    ROMDATA
+id::                    .asciz  "FW 0.5 Tuccia (C) 1997"
 
 ;****************************************
 ;**************** Messaggi per il display
@@ -2410,8 +2418,8 @@ id::                    .asciz  "TS FW.05B Tuccia"
 
 message_open::          .asciz  "    PT117/96    "
 message_name::          .asciz  "Nova Elettra srl"
-message_diag::          .asciz  "  AUTODIAGNOSI  "
-message_attenzione::    .asciz  "Hard Ok  Soft Ok"
+message_diagok::        .asciz  "Hard Ok  Soft Ok"
+message_diagfail::      .asciz  "MALFUNZIONAMENTO"
 message_ok::            .asciz  "   INOLTRATO    "
 message_ready::         .asciz  "Nova PT117 FW0.5"
 message_time::          .asciz  "  ORE ##:##:##  "
@@ -2422,8 +2430,20 @@ message_altime::        .asciz  "per fine tempo  "
 message_break::         .asciz  "   ANNULLATO    "
 message_attendere::     .asciz  "attendere prego."
 
+message_diag::          .asciz  "  AUTODIAGNOSI  "
+msg_romfail::           .asciz  "Checksum ROM: NO"
+msg_romok::             .asciz  "Checksum ROM: Ok"
+msg_e2fail::            .asciz  "Checksum E2:  NO"
+msg_e2ok::              .asciz  "Checksum E2:  Ok"
+msg_rtcfail::           .asciz  "Checksum RTC: NO"
+msg_rtcok::             .asciz  "Checksum RTC: Ok"
+msg_rtcno1::            .asciz  "Registro eventi "
+msg_rtcno2::            .asciz  " non presente.  "
+msg_8880fail::          .asciz  "MT8880 Regs:  NO"
+msg_8880ok::            .asciz  "MT8880 Regs:  Ok"
+
 message_call::          .asciz  "Composizione del"
-message_noresp::        .asciz  ""
+message_noresp::        .asciz  "  Non risponde  "
 message_resp::          .asciz  "Risponde il num."
                                    
 message_progst::        .asciz  " Programmazione "
@@ -2471,35 +2491,37 @@ msglibero::             .asciz  "     LIBERA     "
 msgpbx::                .asciz  "   PBX LIBERO   "
 msghiz::                .asciz  " ALTA IMPEDENZA "
 
-;numero::                .byte   10,3,3,8,8,2,8,2,8,1,1,0
-;numero::                .byte   10,3,3,6,4,6,10,1,8,5,0
+;numero::               .byte   10,3,3,8,8,2,8,2,8,1,1,0
+;numero::               .byte   10,3,3,6,4,6,10,1,8,5,0
 
-;numero::                .byte   1,1,0
-num2::                   .byte   1,2,3,4
+;numero::               .byte   1,1,0
+num2::                  .byte   1,2,3,4
 
+                        .org    (ROMSIZE - 4)
+pattern::               .byte   055h,0AAh
+checksum::              .byte   0,0
 
 ;**************************************************************************
 ;****************** Definizione dei dati dinamici in RAM ******************
 ;**************************************************************************
     
-   .data
-;   .org    0
+                        .data
+;                        .org    0
 
 ;//////////////////////// per usare emulatore /////////////////
-   .org 200h
+                        .org 200h
 ;//////////////////////////////////////////////////////////////
 
 display_buffer::
 line1::                 .blkb   16              ; display buffer of 32 char
 line2::                 .blkb   16
 
-frame_buffer::          .blkw   2               ; format: 0xxxxxx00xxxxxx0
+frame_buffer::          .blkb   2               ; format: 0xxxxxx00xxxxxx0
 
 combtel_buffer::        .blkb   32              ; buffer of 32 numbers
 
-                        .blkb   64
-i2c_buffer::            .blkb   64              ; buffer for i2c bus
+i2c_buffer::            .blkb   8               ; buffer for i2c bus
 
-time_buffer::           .blkb   6               ; buffer for real time clock
+time_buffer::           .blkb   3               ; buffer for real time clock
 
 numero::                .blkb   16      

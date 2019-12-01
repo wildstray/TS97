@@ -10,21 +10,22 @@
 ;* cpl2_w               wr              ; 2 complement word
 ;* T0_start                             ; start T0 timer
 ;* T0_stop                              ; stop T0 timer
-;* rdwr_data_to_SPI                     ; r0->SPI SPI->r0
-;* enable_RX_int                        ;
-;* disable_RX_int                       ;
-;* enable_TX_int                        ;
-;* disable_TX_int                       ;
 ;* delay                us              ; ritardo di xxxxx us (fino 65535)
 ;* sleep                ms              ; ritardo di xxxxx ms (fino 65535)
 ;* print                where,msg       ; visualizza il messaggio msg
 ;* relay1               on/off          ; eccita/diseccita il relay 1
 ;* relay2               on/off          ; eccita/diseccita il relay 2
+;* led1                 on/off          ; accende/spegne il led 1
+;* led2                 on/off          ; accende/spegne il led 2
 ;* spi_di                               ; disable SPI interrupt
 ;* spi_ei                               ; enable SPI interrupt
+;* remote_di                            ; disable REMOTE interrupt
+;* remote_ei                            ; enable REMOTE interrupt
+;* _8880_di                             ; disable MT8880 interrupt
+;* _8880_ei                             ; enable MT8880 interrupt
 ;* byte2bcd             byte,bcd10,bcd1 ; byte to BCD (10,1)
 ;* bcd2byte             bcd10,bcd1,byte ; BCD (10,1) to byte
-;* i2c            opr,slave,addr,lenght ; read/write/verify i2c slaves
+;* I2C            opr,slave,addr,lenght ; read/write/verify i2c slaves
 ;*************************************************************************
 
 ;************************             
@@ -73,46 +74,6 @@
    and     T_TCR,#~cen
    popu    PPR
 .endm
-;************************
-.macro  rdwr_data_to_SPI                       
-	do {                                    ;\
-      tm      SPICR,#10h                   ; | wait SPI empty
-	} while [ CLZ ]                         ; |
-	ld      SPIDR,r0                        ; | r0 -> SPIDR
-	nop                                     ; |
-	do {                                    ; |
-      tm      SPICR,#10h                   ; | wait SPI empty
-	} while [ CLZ ]                         ; | SPIDR -> r0
-	ld      r0,SPIDR                        ;/
-.endm
-;************************    
-.macro  enable_RX_int        
-	pushu   PPR          
-	spp     #SCI1_PG     
-	or      S_IMR,#2     
-	popu    PPR          
-.endm                        
-;************************    
-.macro  disable_RX_int       
-	pushu   PPR          
-	spp     #SCI1_PG     
-	and     S_IMR,#0FDh  
-	popu    PPR          
-.endm                        
-;************************    
-.macro  enable_TX_int        
-	pushu   PPR          
-	spp     #SCI1_PG     
-	or      S_IMR,#1     
-	popu    PPR          
-.endm                        
-;************************    
-.macro  disable_TX_int       
-	pushu   PPR          
-	spp     #SCI1_PG     
-	and     S_IMR,#0FEh  
-	popu    PPR          
-.endm                        
 ;************************    
 .macro  delay   us
 	pushuw  rr0
@@ -163,14 +124,36 @@
    or    EIMR,#ib0m    
 .endm
 ;************************
+.macro   remote_di       
+   and   EIPR,#~ipd1m
+   and   EIMR,#~id1m 
+.endm
+;************************
+.macro   remote_ei
+   and   EIPR,#~ipd1m  
+	nop
+   or    EIMR,#id1m    
+.endm
+;************************
+.macro   _8880_di       
+   and   EIPR,#~ipa1m
+   and   EIMR,#~ia1m 
+.endm
+;************************
+.macro   _8880_ei
+   and   EIPR,#~ipa1m  
+	nop
+   or    EIMR,#ia1m    
+.endm
+;************************
 .macro   relay1 status
    pushu r0
    ld    r0,#status
    if [r0 == #0]
    {
-      clr_bit P5DR,REL1
+      and     P2DR,#~REL1
    } else {
-      set_bit P5DR,REL1
+      or      P2DR,#REL1
    }
    popu  r0
 .endm
@@ -180,9 +163,33 @@
    ld    r0,#status
    if [r0 == #0]
    {
-      clr_bit P5DR,REL2
+      and     P2DR,#~REL2
    } else {
-      set_bit P5DR,REL2
+      or      P2DR,#REL1
+   }
+   popu  r0
+.endm
+;************************
+.macro   led1 status
+   pushu r0
+   ld    r0,#status
+   if [r0 == #0]
+   {
+      and     P2DR,#~LED1
+   } else {
+      or      P5DR,#LED1
+   }
+   popu  r0
+.endm
+;************************
+.macro   led2 status
+   pushu r0
+   ld    r0,#status
+   if [r0 == #0]
+   {
+      and     P2DR,#~LED2
+   } else {
+      or      P5DR,#LED2
    }
    popu  r0
 .endm
@@ -207,29 +214,33 @@
    popu    r0
 .endm
 ;************************
-.macro i2c op,slave,addr,lenght
-   pushuw rr0
+.macro I2C op,slave,addr,lenght
+   pushu   PPR
+   spp     #0
    clr     EIPR
    pushu   EIMR
    clr     EIMR
-   ld    SLAVE_STAT,#SLAVE_READY
-   ld    SLAVE_OP,#op
-   ld    SLAVE_W,#slave
-   ldw   rr0,addr
-   ldw   LENGHT,lenght
-;   ifw [rr0 > #255]                 
-;   {                                     
-;      and   r0,#00000111b
-;      rol   r0
-;      or    SLAVE_W,r0
-;   }
-   ld    SLAVE_ADDR,r1
-   call  i2c_bus
+   pushuw  rr0
+   ld      SLAVE_STAT,#SLAVE_READY
+   ld      SLAVE_OP,#op
+   ld      SLAVE_W,#slave
+   ldw     rr0,addr
+   ldw     LENGHT,lenght
+   ifw [rr0 > #255]                 
+   {                                     
+      and     r0,#00000111b
+      rol     r0
+      or      SLAVE_W,r0
+   }
+   ld      SLAVE_ADDR,r1
+   call    i2c_transfer
    waitbit SLAVE_STAT,#SLAVE_READY
-   clr     EIPR
-   nop
-   popu    EIMR
+   delay   #2300
    popuw   rr0
+;   clr     EIPR
+;   nop
+   popu    EIMR
+   popu    PPR
 .endm
 ;************************
 .macro bcd2ascii bcd,ascii
@@ -247,5 +258,18 @@
             ld      ascii,bcd
             add     ascii,#48
    }
+.endm
+;************************
+.macro zero address,lenght
+   pushuw  rr0
+   pushuw  rr2
+   xor     r0,r0
+   ldw     rr2,lenght
+   loopw   [rr2]
+   {
+      ld      address(rr2),r0
+   }
+   popuw   rr2
+   popuw   rr0
 .endm
 ;************************
