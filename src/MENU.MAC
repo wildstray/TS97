@@ -1,0 +1,210 @@
+;****************************************************************************
+;**************************** macro list ************************************
+;****************************************************************************
+;* print                where,msg       ; visualizza il messaggio msg
+;* .menu                maxmenu         ; make a selection menu (of maxmenu)
+;* .display             num,text1,text2 ; display the menu number num
+;* .action    todo }    num             ; if confirmed execute 
+;* .back                                ; backward instead forward key
+;* .endmenu                             ; current menu termination
+;* .input               buffer,begin,end; user input beetwen begin and end
+;* .maxval              pos,val,prec    ;
+;* .break               pos,char        ; put a break char in pos
+;* .endinput                            ; end of user input
+;****************************************************************************
+
+;************************
+.macro  print  where,message
+   pushuw  rr0
+   pushuw  rr2
+   pushuw  rr4
+   ldw     rr0,#where
+   ldw     rr2,#message
+   ld      r4,#16
+   loop [r4] {
+      lddp (rr0)+,(rr2)+
+   }
+   popuw   rr4
+   popuw   rr2
+   popuw   rr0
+.endm
+;************************
+.macro .menu maxmenu
+   ld      r2,#0
+   loop {
+      ld      r1,DIGIT
+      clr     DIGIT
+      .ifc nb maxmenu
+      if [r1 == #FORWBACK]
+      {
+         inc      r2
+         if [r2 > #maxmenu]
+         {
+            xor    r2,r2
+         }
+      }
+      .endc
+.endm
+;************************
+.macro .display num,text1,text2
+   if [r2 == #num]
+   {
+      print line1,text1
+      print line2,text2
+   }
+.endm
+;************************
+.macro .action num
+      if [[r2 == #num] && [r1 == #CONFIRM]]
+      {
+.endm
+;************************
+.macro .back
+      if [r1 == #FORWBACK]
+      {
+         break
+      }
+.endm
+;************************
+.macro .endmenu
+      ifnobit SWITCH, #PROG
+         break
+      }
+      clr     r1
+   }
+.endm
+;************************
+.macro .input minpos,maxpos
+   ld      r15,#maxpos+1
+   ld      r14,#minpos+1
+   loop
+   {
+      ld      r1,DIGIT
+      clr     DIGIT
+      if [[r8 >= minpos] && [r8 <= r15]]
+      {
+.endm
+;************************
+.macro .maxval pos,val,prec
+         .ifc b prec
+         if [[r1 > #val] && [r1 < #10] && [r8 == #pos]]
+         {
+            clr     r1
+         }
+         .endc
+         .ifc nb prec
+         ld      r9,-(rr10)
+         if [[r9 < #10] && [r9 >= #prec] && [r1 > #val] && [r1 < #10] && [r8 == #pos]]
+         {
+           clr     r1
+         }
+         incw    rr10
+         .endc
+.endm
+;************************
+.macro .break pos,char
+         if [[r1 != #0] && [r1 <= #10] && [r8 == #pos-1]]
+         {
+            bcd2ascii  r1,r9
+            ld      (rr6)+,r9
+            ld      (rr10)+,r1
+            ld      r9,#char
+            ld      (rr6)+,r9
+            ld      r9,#95
+            ld      (rr6),r9
+            inc     r8
+            inc     r8
+            clr     r1
+         }
+         if [[r1 == #FORWBACK] && [r8 == #pos+1]]
+         {
+            ld      r1,#0
+            ld      r9,#48
+            ld      (rr6),r9
+            ld      r9,#char 
+            ld      -(rr6),r9
+            dec     r8
+            ld      r9,#95
+            ld      -(rr6),r9
+            ld      -(rr10),r1
+            dec     r8
+            clr     r1
+         }
+.endm
+;************************
+.macro .endinput
+         if [[r1 != #0] && [r1 <= #10] && [r8 < r15]]
+         {
+            bcd2ascii  r1,r9
+            ld      (rr6)+,r9
+            ld      (rr10)+,r1
+            ld      r9,#95
+            ld      (rr6),r9
+            inc     r8
+            clr     r1
+         }
+         if [[r1 == #FORWBACK] && [r8 == r15]]
+         {
+            ld      r1,#0
+            ld      r9,#32
+            ld      (rr6),r9
+            ld      r9,#95
+            ld      -(rr6),r9
+            ld      -(rr10),r1
+            dec     r8
+            clr     r1
+         }
+         if [[r1 == #FORWBACK] && [r8 >= r14]] 
+         {
+            ld      r1,#0
+            ld      r9,#48
+            ld      (rr6),r9
+            ld      r9,#95
+            ld      -(rr6),r9
+            ld      -(rr10),r1
+            dec     r8
+            clr     r1
+         }
+         if [[r1 == #CONFIRM] && [r8 == r15]]
+         {
+            ld      r9,#32
+            ld      (rr6),r9
+            ld      (rr10),#0
+            break
+         }
+         if [r1 == #CONFIRM]
+         {
+            ld      (rr10),#0
+            break
+         }
+      }
+      clr     r1
+   }
+.endm
+;************************
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -29,24 +29,22 @@
                         .list           me      
                         .page
 
-;***************************************
-;*********************** Include section
-;***************************************
-;*
-;* The following section include the standard 
-;* symbols for the ST9040
-;*
-;***************************************
+;**************************************************************************
+;**************************** Include section *****************************
+;**************************************************************************
 .nlist             
-.include    "\st9\include\system.inc"    ; System register
-.include    "\st9\include\page_0.inc"    ; Page 0 register
-.include    "\st9\include\io_port.inc"   ; I/O port register
-.include    "\st9\include\mftimer.inc"   ; MF Timer register
-.include    "\st9\include\ad_c.inc"      ; A/D converter register
-.include    "\st9\include\sci.inc"       ; SCI register
-.include    "\st9\include\bitmacro.inc"  ; BIT macros
+.include    "..\include\system.inc"    ; System register
+.include    "..\include\page_0.inc"    ; Page 0 register
+.include    "..\include\io_port.inc"   ; I/O port register
+.include    "..\include\mftimer.inc"   ; MF Timer register
+.include    "..\include\ad_c.inc"      ; A/D converter register
+.include    "..\include\sci.inc"       ; SCI register
+.include    "..\include\bitmacro.inc"  ; BIT macros
 .list
-.include        "nova.mac"
+.include    "nova.mac"
+.include    "menu.mac"
+
+
 
 ;**************************************************************************
 ;******************** Simbols and numerical equivalences ******************
@@ -80,6 +78,7 @@ ROMSIZE         = 4000h                 ; ROM size
 on              = 1             
 off             = 0            
 
+;I2C BUS RELATED
 E2_SLAVE     == 10100000b           ; EEPROM control byte
 RTC_SLAVE    == 11010000b           ; Real Time Clock control byte
 
@@ -100,6 +99,7 @@ NO_ACK       == 4                   ; Slave has not acknowledged.
 SLAVE_READY  == 80h                 ; Slave is ready for a new operation...
 
 
+;DTMF/LINETONE DEFINES
 DTMFAVLB        = 00000100b
 DTMFINOUT       = 00000101b
 DTMFTONE        = 00000110b
@@ -108,12 +108,19 @@ TONEDIAL        = 1
 TONEPBX         = 2
 TONEBUSY        = 3
 
+
+;E2PROM MEMORY LOCATIONS
 E2_CHECKSUM     = 0
 E2_SERIAL       = 2
 E2_REMOTE       = 6
 E2_NUMERS       = 480
 E2_EVENTS       = 608
 E2_SIZE         = 2048
+
+
+;MENUS/KEYPAD DECLARATION
+FORWBACK        = 11
+CONFIRM         = 12
 
 
 ;***************************************
@@ -602,6 +609,7 @@ main::
          print    line2, message_alrem
          jx       allarme
       }
+;      call    clock_read
       call    clock
    }
 
@@ -764,49 +772,32 @@ progr::
 	ld      r0,#DTMFINOUT
 	call    _8880_ctrl_wr
 
-   loop {
-      ld      r1,DIGIT
-      clr     DIGIT
-      if [r1 == #11]
-      {
-         inc      r2
-         if [r2 > #5]
-         {
-           xor    r2,r2
-         }
+   .menu 5
+      .display 0, menu_oradata,      message_tastipr
+      .display 1, menu_messaggi,     message_tastipr
+      .display 2, menu_numeri,       message_tastipr
+      .display 3, menu_telecomando,  message_tastipr
+      .display 4, menu_tempi,        message_tastipr
+      .display 5, menu_riservato,    message_tastipr   
+      .action  0
+                  call    menu_clock
       }
-      if [r1 == #12]
-      {
-         call  main_menu 
+      .action  1
+                  call    menu_messages
       }
-      print   line2, message_tastipr
-      switch [r2]
-      {
-         case #0:
-            print   line1, menu_oradata
-         case #1:
-            print   line1, menu_messaggi
-         case #2:
-            print   line1, menu_numeri
-         case #3:
-            print   line1, menu_telecomando
-         case #4:
-            print   line1, menu_tempi
-         case #5:
-            print   line1, menu_riservato
+      .action  2
+                  call    menu_numbers
       }
-;      if [PHONE == #0]
-;      {
-;         break
-;      }
-;      ifbit SWITCH, #RESET
-;         break
-;      }
-      ifnobit SWITCH, #PROG
-         break
+      .action  3
+                  call    menu_remote
       }
-      clr     r1
-   }
+      .action  4
+                  call    menu_notavail
+      }
+      .action  5
+                  call    menu_notavail
+      }
+   .endmenu
    relay1  off
    relay2  off
    print   line1, message_fineprog1
@@ -815,218 +806,108 @@ progr::
    jx      idle
 
 
-proc main_menu [r1,r2]
+proc menu_notavail [r1,r2]
 {
-   loop {
-      ld      r1,DIGIT
-      clr     DIGIT
-      switch [r2]
-      {
-         case #0:
-            print   line1, sub_oradata1
-            print   line2, sub_oradata2
-         case #1:
-            call    menu_messages
-            break
-         case #2:
-            call    menu_numbers
-            break
-         case #3:
-            call    menu_remote
-            break
-         case #4:
-            print   line1, sub_tempi1
-            print   line2, sub_tempi2
-         case #5:
-            print   line1, sub_riservato1
-            print   line2, sub_riservato2
-      }
-      if [r1 == #11]
-      {
-         break
-      }
-      if [r1 == #12]
-      {
-         switch [r2]
-         {
-            case #1:
-               call   menu_messages
-         }
-      }
-      ifnobit SWITCH, #PROG
-         break
-      }
-      clr     r1
-   }
+   .menu
+      print   line1, sub_notavail1
+      print   line2, sub_notavail2
+      .back
+   .endmenu
 }
 
 proc menu_remote [r1,r2]
 {
-   ld      r2,#0
-   ld      r0,#1
-   loop {
-      ld      r1,DIGIT
-      clr     DIGIT
-      if [r1 == #11]
-      {
-         inc      r2
-         if [r2 > #2]
-         {
-           xor    r2,r2
-         }
-      }
-      switch [r2]
-      {
-         case #0:
-               print   line1, sub_remote1
-               print   line2, sub_remote2
-         case #1:
-               print   line1, sub_remcode1
-               print   line2, sub_remcode2
-         case #2:
-               print   line1, menu_preced1
-               print   line2, menu_preced2
-      }
-      if [r1 == #12]
-      {
-         switch [r2]
-         {
-            case #0:
-               print   line1, sub_remhit1
-               print   line2, sub_remhit2
-               ldw     rr2,#frame_buffer
-               ldw     (rr2),#0
-               ldw     rr8,#200
-               remote_ei
-               loopw [rr8]
-               {
-                  sleep   #100
-                  ldw     rr2,(frame_buffer)
-                  ifw [rr2 != #0]
+   .menu 2
+      .display 0, sub_remote1,       sub_remote2
+      .display 1, sub_remcode1,      sub_remcode2
+      .display 2, menu_preced1,      menu_preced2
+      .action  0
+                  print   line1, sub_remhit1
+                  print   line2, sub_remhit2
+                  ldw     rr2,#frame_buffer
+                  ldw     (rr2),#0
+                  ldw     rr8,#200
+                  remote_ei
+                  loopw [rr8]
                   {
-                     break
+                     sleep   #100
+                     ldw     rr2,(frame_buffer)
+                     ifw [rr2 != #0]
+                     {
+                        break
+                     }
+                     ifnobit SWITCH, #PROG
+                        break
+                     }
                   }
-                  ifnobit SWITCH, #PROG
-                     break
+                  remote_di
+                  ifw [rr2 == #0]
+                  {
+                     print   line1, sub_remfail1
+                     print   line2, sub_remfail2
+                     sleep   #1000
+                  } else {
+                     ldw     rr2,#i2c_buffer
+                     ldw     rr4,#frame_buffer
+                     lddd    (rr2)+,(rr4)+
+                     lddd    (rr2)+,(rr4)+
+                     I2C WRITE,E2_SLAVE,#E2_REMOTE,#2
+                     print   line1, sub_remok1
+                     print   line2, sub_remok2
+                     sleep   #1000
                   }
-               }
-               remote_di
-               ifw [rr2 == #0]
-               {
-                  print   line1, sub_remfail1
-                  print   line2, sub_remfail2
-                  sleep   #1000
-               } else {
-                  ldw     rr2,#i2c_buffer
-                  ldw     rr4,#frame_buffer
-                  lddd    (rr2)+,(rr4)+
-                  lddd    (rr2)+,(rr4)+
-                  I2C WRITE,E2_SLAVE,#E2_REMOTE,#2
-                  print   line1, sub_remok1
-                  print   line2, sub_remok2
-                  sleep   #1000
-               }
-            case #1:
-            case #2:
-               break
-         }
       }
-      ifnobit SWITCH, #PROG
-         break
+      .action 2
+                     break
       }
-      clr     r1
-   }
+   .endmenu
 }
 
 
 proc menu_messages [r1,r2]
 {
-   ld      r2,#0
-   ld      r0,#1
-   loop {
-      ld      r1,DIGIT
-      clr     DIGIT
-      if [r1 == #11]
-      {
-         inc      r2
-         if [r2 > #2]
-         {
-           xor    r2,r2
-         }
+   .menu 2
+      .display 0, messaggi_record1,  messaggi_record2
+      .display 1, messaggi_play1,    messaggi_play2
+      .display 2, menu_preced1,      menu_preced2
+      .action  0
+                  call    _1420_reset
+                  sleep   #200
+                  print   line1, sub_record1
+                  print   line2, sub_record2
+                  call    _1420_record
+                  sleep   #5000
+                  call    _1420_stop
+                  print   line1, sub_recend1
+                  print   line2, sub_recend2
+                  sleep   #1000
       }
-      switch [r2]
-      {
-         case #0:
-               print   line1, messaggi_record1
-               print   line2, messaggi_record2
-         case #1:
-               print   line1, messaggi_play1
-               print   line2, messaggi_play2
-         case #2:
-               print   line1, menu_preced1
-               print   line2, menu_preced2
+      .action  1
+                  call    _1420_reset
+                  sleep   #200
+                  print   line1, sub_play1
+                  print   line2, sub_play2
+                  call    _1420_play
+                  sleep   #5000
+                  call    _1420_stop
+                  print   line1, sub_playend1
+                  print   line2, sub_playend2
       }
-      if [r1 == #12]
-      {
-         switch [r2]
-         {
-            case #0:
-               call    _1420_reset
-               sleep   #200
-               print   line1, sub_record1
-               print   line2, sub_record2
-               call    _1420_record
-               sleep   #5000
-               call    _1420_stop
-               print   line1, sub_recend1
-               print   line2, sub_recend2
-               sleep   #1000
-            case #1:
-               call    _1420_reset
-               sleep   #200
-               print   line1, sub_play1
-               print   line2, sub_play2
-               call    _1420_play
-               sleep   #5000
-               call    _1420_stop
-               print   line1, sub_playend1
-               print   line2, sub_playend2
-            case #2:
-               break
-         }
+      .action  2
+                  break
       }
-      ifnobit SWITCH, #PROG
-         break
-      }
-      clr     r1
-   }
+   .endmenu
 }
 
-proc menu_numbers [r1]
+proc menu_numbers [r1,r2]
 {
-   ld      r2,#0
    ld      r0,#1
-   loop {
-      ld      r1,DIGIT
-      clr     DIGIT
-      if [r1 == #11]
-      {
-         inc      r2
-         if [r2 > #8]
-         {
-           xor    r2,r2
-         }
-      }
-      if [[r1 == #12] && [r2 == #8]]
-      {
+   .menu 8
+      .display 8, menu_preced1,      menu_preced2
+      .action  8
          break
       }
-      if [r2 == #8]
-      {
-         print   line1,menu_preced1
-         print   line2,menu_preced2
-      }
-      if [r1 == #12]
+      if [r1 == #CONFIRM]
       {
          call    number_enter
       }
@@ -1036,13 +917,26 @@ proc menu_numbers [r1]
          call    number_read
          call    number_show
       }
-      ifnobit SWITCH, #PROG
-         break
-      }
-      clr     r1
-   }
+   .endmenu
 }
 
+proc menu_clock [r1,r2]
+{
+   .menu 2
+      .display 0, sub_time1,         sub_time2
+      .display 1, sub_date1,         sub_date2
+      .display 2, menu_preced1,      menu_preced2
+      .action 0
+                  call time_enter
+      }
+      .action 1
+                  call date_enter
+      }
+      .action 2
+                  break
+      }
+   .endmenu
+}
 
 
 ;*************************************************************************
@@ -1244,13 +1138,13 @@ peppo::
             ld      r4,#48
             ld      (rr6)+,r4
             call    _1420_reset
-	      case #11:
+         case #FORWBACK:
             ld      r4,#00101010b
             ld      (rr6)+,r4
             call    _1420_record
             sleep   #5000
             call    _1420_stop
-         case #12:
+         case #CONFIRM:
             ld      r4,#00100011b
             ld      (rr6)+,r4
             call    _1420_play
@@ -2391,16 +2285,15 @@ proc TEST_ACK [PPR]
 ;***************************** Routines varie *****************************
 ;**************************************************************************
 
-proc clock [r0,r1,r2,r3,r4,r5,r6,r7,r8]
+proc clock [r0,r1,r2,r3,r4,r5,r8]
 {
-   I2C     READ,RTC_SLAVE,#0,#4
-
+   call    clock_read
    ldw     rr6,#12
    ldw     rr4,#0
    ld      r8,#58
    ld      r3,#3
    loop [r3] {
-      ld    r0,i2c_buffer(rr4)
+      ld    r0,time_buffer(rr4)
       incw  rr4
       byte2bcd r0,r2,r1
       bcd2ascii r1,r1
@@ -2413,8 +2306,24 @@ proc clock [r0,r1,r2,r3,r4,r5,r6,r7,r8]
       ld    line2(rr6),r2
       subw  rr6,#3
    }
-
 }
+
+proc clock_read [PPR]
+{
+   I2C     READ,RTC_SLAVE,#0,#3
+   ldw     rr0,#i2c_buffer
+   ldw     rr2,#time_buffer
+   lddd    (rr2)+, (rr0)+
+   lddd    (rr2)+, (rr0)+
+   lddd    (rr2)+, (rr0)+
+   I2C     READ,RTC_SLAVE,#4,#3
+   ldw     rr0,#i2c_buffer
+   ldw     rr2,#date_buffer
+   lddd    (rr2)+, (rr0)+
+   lddd    (rr2)+, (rr0)+
+   lddd    (rr2)+, (rr0)+
+}
+
 
 proc clock_start [r0,r1,r2,r3]
 {
@@ -2430,9 +2339,14 @@ proc clock_start [r0,r1,r2,r3]
 ;   }
 }
 
-proc clock_enter [r0,r1,r2,r3]
+
+proc clock_stop [r0,r1,r2,r3]
 {
+   I2C READ,RTC_SLAVE,#0,#1
+   or  (i2c_buffer),#80h
+   I2C WRITE,RTC_SLAVE,#0,#1
 }
+
 
 proc rom_check [r1,r2,r3]
 {
@@ -2590,7 +2504,7 @@ proc number_enter [r0,r1]
            inc     r8
          }
       }
-      if [[r1 == #11] && [r8 >= #0]]
+      if [[r1 == #FORWBACK] && [r8 >= #0]]
       {
          ld      r1,#0
          ld      r9,#32
@@ -2600,7 +2514,7 @@ proc number_enter [r0,r1]
          ld      -(rr10),r1
          dec     r8
       }
-      if [r1 == #12]
+      if [r1 == #CONFIRM]
       {
          ld      r9,#32
          ld      (rr6),r9
@@ -2612,11 +2526,192 @@ proc number_enter [r0,r1]
    call    number_write
 }
 
+
+proc otime_enter [r0,r1,r2,r3]
+{
+   call    display_bufclr
+   call    clock_read
+   ldw     rr6,#10
+   ldw     rr4,#0
+   ld      r8,#58
+   ld      r3,#3
+   loop [r3] {
+      ld    r0,time_buffer(rr4)
+      incw  rr4
+      byte2bcd r0,r2,r1
+      bcd2ascii r1,r1
+      bcd2ascii r2,r2
+      if [r3 <= 2]
+      {
+         ld    line2+2(rr6),r8
+      }
+      ld    line2+1(rr6),r1
+      ld    line2(rr6),r2
+      subw  rr6,#3
+   }
+
+   ldw      rr6,#line2
+   ldw      rr10,#time_buffer
+   ld       r8,#4
+   addw     rr6,#4
+   ld       r9,#95
+   ld       (rr6),r9
+   loop
+   {
+      ld      r1,DIGIT
+      clr     DIGIT
+      if [[r8 >= #4] && [r8 <= #12]]
+      {
+         if [[r1 != #0] && [r1 <= #10] && [r8 == #5] || [r8 == #8]]
+         {
+            bcd2ascii  r1,r9
+            ld      (rr6)+,r9
+            ld      (rr10)+,r1
+;            sleep   #200
+            ld      r9,#58
+            ld      (rr6)+,r9
+            ld      r9,#95
+            ld      (rr6),r9
+            inc     r8
+            inc     r8
+            clr     r1
+         }
+;         if [[r1 != #0] && [r1 <= #10] && [r8 <= #11]]
+         if [[r1 != #0] && [r1 <= #10] && [r8 < #12]]
+         {
+            bcd2ascii  r1,r9
+            ld      (rr6)+,r9
+            ld      (rr10)+,r1
+            ld      r9,#95
+            ld      (rr6),r9
+            inc     r8
+            clr     r1
+         }
+         if [[r1 == #FORWBACK] && [r8 == #12]]
+         {
+            ld      r1,#0
+            ld      r9,#32
+            ld      (rr6),r9
+            ld      r9,#95
+            ld      -(rr6),r9
+            ld      -(rr10),r1
+            dec     r8
+            clr     r1
+         }
+         if [[r1 == #FORWBACK] && [r8 == #7] || [r8 == #10]]
+         {
+            ld      r1,#0
+            ld      r9,#48
+            ld      (rr6),r9
+;            sleep   #200
+            ld      r9,#58 
+            ld      -(rr6),r9
+            dec     r8
+            ld      r9,#95
+            ld      -(rr6),r9
+            ld      -(rr10),r1
+            dec     r8
+            clr     r1
+         }
+         if [[r1 == #FORWBACK] && [r8 >= #5]]
+         {
+            ld      r1,#0
+            ld      r9,#48
+            ld      (rr6),r9
+            ld      r9,#95
+            ld      -(rr6),r9
+            ld      -(rr10),r1
+            dec     r8
+            clr     r1
+         }
+         if [[r1 == #CONFIRM] && [r8 == #12]]
+         {
+            ld      r9,#32
+            ld      (rr6),r9
+            ld      (rr10),#0
+            break
+         }
+         if [r1 == #CONFIRM]
+         {
+            ld      (rr10),#0
+            break
+         }
+      }
+      clr     r1
+   }
+}
+
+
+proc time_enter [r0,r1,r2,r3]
+{
+   call    clock_read
+   ldw     rr6,#10
+   ldw     rr4,#0
+   ld      r8,#58
+   ld      r3,#3
+   loop [r3] {
+      ld    r0,time_buffer(rr4)
+      incw  rr4
+      byte2bcd r0,r2,r1
+      bcd2ascii r1,r1
+      bcd2ascii r2,r2
+      if [r3 <= 2]
+      {
+         ld    line2+2(rr6),r8
+      }
+      ld    line2+1(rr6),r1
+      ld    line2(rr6),r2
+      subw  rr6,#3
+   }
+
+   zero     time_buffer,#6
+
+   ldw      rr6,#line2
+   ldw      rr10,#time_buffer
+   ld       r8,#4
+   addw     rr6,#4
+   ld       r9,#95
+   ld       (rr6),r9
+   .input   4,11
+     .maxval   4,2
+     .maxval   5,3,2
+     .maxval   7,5
+     .maxval   10,5
+     .break    6,58
+     .break    9,58
+   .endinput
+}
+
+
+proc date_enter [r0,r1,r2,r3]
+{
+   call    clock_read
+   ldw     rr6,#12
+   ldw     rr4,#0
+   ld      r8,#58
+   ld      r3,#3
+   loop [r3] {
+      ld    r0,date_buffer(rr4)
+      incw  rr4
+      byte2bcd r0,r2,r1
+      bcd2ascii r1,r1
+      bcd2ascii r2,r2
+      if [r3 <= 2]
+      {
+         ld    line2+3(rr6),r8
+      }
+      ld    line2+1(rr6),r1
+      ld    line2(rr6),r2
+      subw  rr6,#5
+   }
+}
+
+
 ;**************************************************************************
 ;************************** Dati statici in rom ***************************
 ;**************************************************************************
 
-                        .org    ROMDATA
+;                        .org    ROMDATA
 id::                    .asciz  "FW 0.5 Tuccia (C) 1997"
 
 ;****************************************
@@ -2628,7 +2723,7 @@ message_name::          .asciz  "Nova Elettra srl"
 message_diagok::        .asciz  "Hard Ok  Soft Ok"
 message_diagfail::      .asciz  "MALFUNZIONAMENTO"
 message_ok::            .asciz  "   INOLTRATO    "
-message_ready::         .asciz  "Nova PT117 FW0.5"
+message_ready::         .asciz  "Telesoccorso DGE"
 message_time::          .asciz  "  ORE ##:##:##  "
 message_alarm::         .asciz  "Allarme in corso"
 message_alrem::         .asciz  "da telecomando  "
@@ -2666,13 +2761,13 @@ menu_numeri::           .asciz  "  Numeri Tel. ~"
 menu_telecomando::      .asciz  " Telecomando  ~"
 menu_tempi::            .asciz  "    Tempi     ~"
 menu_riservato::        .asciz  "  Riservato    "
-sub_oradata1::          .asciz  "Non disponibile!"
-sub_oradata2::          .asciz  " *             "
+sub_notavail1::         .asciz  "Non disponibile!"
+sub_notavail2::         .asciz  " *             "
 
-messaggi_record1::      .asciz  "Nuovo messaggio~"
-messaggi_record2::      .asciz  " *~  # Registra "
-messaggi_play1::        .asciz  "Controlla mess.~"
-messaggi_play2::        .asciz  " *~  # Riascolta"
+messaggi_record1::      .asciz  "    Registra   ~"
+messaggi_record2::      .asciz  " *~   # Inizia  "
+messaggi_play1::        .asciz  "  Riascolta   ~"
+messaggi_play2::        .asciz  " *~   # Inizia  "
 sub_record1::           .asciz  "  Parlare nel   "
 sub_record2::           .asciz  " microfono....  "
 sub_recend1::           .asciz  "   Messaggio    "
@@ -2686,16 +2781,22 @@ messaggi_alarm::        .asciz  "Mess. Allarme #~"
 sub_numeri1::           .asciz  "   Numeri Tel.  "
 sub_numeri2::           .asciz  " *  # Conferma "
 
-sub_remote1::           .asciz  "Aquisisci nuovo~"
-sub_remote2::           .asciz  " *  # Conferma "
-sub_remcode1::          .asciz  "Conferma codice~"
+sub_remote1::           .asciz  "   Aquisisci   ~"
+sub_remote2::           .asciz  " *~    # Inizia "
+sub_remcode1::          .asciz  " Imposta man. ~"
 sub_remcode2::          .asciz  "  ############  "
+
 sub_remhit1::           .asciz  "Premere il tasto"
 sub_remhit2::           .asciz  "del telecomando!"
 sub_remok1::            .asciz  "Codice aquisito "
 sub_remok2::            .asciz  "                "
 sub_remfail1::          .asciz  "  Telecomando   "
 sub_remfail2::          .asciz  " NON AQUISITO!  "
+
+sub_time1::             .asciz  "  Cambio ORA:  ~"
+sub_time2::             .asciz  "    ##:##:##    " 
+sub_date1::             .asciz  "  Cambio DATA: ~"
+sub_date2::             .asciz  "    ##/##/##    " 
 
 sub_tempi1::            .asciz  "    Tempi     ~"
 sub_tempi2::            .asciz  " *             "
@@ -2723,11 +2824,12 @@ msgpbx::                .asciz  "   PBX LIBERO   "
 msghiz::                .asciz  " ALTA IMPEDENZA "
 
 
+
 ;**************************************************************************
 ;************************* Fine ROM - Checksum ****************************
 ;**************************************************************************
 
-                        .org    (ROMSIZE - 8)
+;                        .org    (ROMSIZE - 8)
 pattern::               .byte   055h,0AAh
 serial::                .byte   1,0,0,2
 checksum::              .byte   0,0
@@ -2744,10 +2846,6 @@ checksum::              .byte   0,0
                         .org 200h
 ;//////////////////////////////////////////////////////////////
 
-display_buffer::
-line1::                 .blkb   16              ; display buffer of 32 char
-line2::                 .blkb   16
-
 frame_buffer::          .blkb   2               ; format: 0xxxxxx00xxxxxx0
 remote_buffer::         .blkb   2               ; format: 0xxxxxx00xxxxxx0
 
@@ -2755,6 +2853,11 @@ combtel_buffer::        .blkb   16              ; buffer of 16 numbers
 
 i2c_buffer::            .blkb   8               ; buffer for i2c bus
 
-time_buffer::           .blkb   3               ; buffer for real time clock
+time_buffer::           .blkb   6               ; buffer for rtc time
+date_buffer::           .blkb   8               ; buffer for rtc date
 
 number::                .blkb   16              ; current telefonic number
+
+display_buffer::
+line1::                 .blkb   16              ; display buffer of 32 char
+line2::                 .blkb   16
