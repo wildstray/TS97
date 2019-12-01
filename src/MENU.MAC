@@ -70,7 +70,7 @@
 .endm
 ;************************
 .macro .display num,text1,text2,calls
-   if [r2 == #num]
+   if [r2 == num]
    {
       print line1,#text1
       .ifc nb text2
@@ -83,7 +83,7 @@
 .endm
 ;************************
 .macro .action num
-      if [[r2 == #num] && [r1 == #CONFIRM]]
+      if [[r2 == num] && [r1 == #CONFIRM]]
       {
 .endm
 ;************************

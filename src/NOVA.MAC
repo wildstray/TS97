@@ -24,10 +24,11 @@
 ;* remote_ei                            ; enable REMOTE interrupt
 ;* _8880_di                             ; disable MT8880 interrupt
 ;* _8880_ei                             ; enable MT8880 interrupt
-;* byte2bcd             byte,bcd10,bcd1 ; byte to BCD (10,1)
-;* bcd2byte             bcd10,bcd1,byte ; BCD (10,1) to byte
+;* byte2bcd             byte,bcd10,bcd1 ; byte to BCD (F,F)
+;* bcd2byte             bcd10,bcd1,byte ; BCD (F,F) to byte
 ;* I2C            opr,slave,addr,lenght ; read/write/verify i2c slaves
 ;* zero                 address,lenght  ; zeros a buffer of lenght bytes
+;* byte2dec             byte,bcd10,bcd1 ; byte to BCD (9,9)
 ;****************************************************************************
 
 ;************************             
@@ -143,14 +144,24 @@
 .endm
 ;************************
 .macro   _8880_di       
+   .ifc df EMU
    and   EIPR,#~ipa1m
    and   EIMR,#~ia1m 
+   .endc
+   .ifc ndf EMU
+   ld    DTMF_S,#0
+   .endc
 .endm
 ;************************
 .macro   _8880_ei
+   .ifc df EMU
    and   EIPR,#~ipa1m  
 	nop
    or    EIMR,#ia1m    
+   .endc
+   .ifc ndf EMU
+   ld    DTMF_S,#1
+   .endc
 .endm
 ;************************
 .macro   relay1 status
@@ -290,3 +301,17 @@
    }
 .endm
 ;************************
+.macro byte2dec byte,bcd10,bcd1
+   ld      bcd10,#0
+   while [byte > #9]
+   {
+      inc     bcd10
+      sub     byte,#10
+   }
+   ld      bcd1,byte
+.endm
+;************************
+
+
+
+
