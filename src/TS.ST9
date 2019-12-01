@@ -114,6 +114,7 @@ E2_NUMERS       = 64
 E2_EVENTS       = 128
 E2_SIZE         = 2048
 E2_PGSIZE       = 16
+E2_PGMASK       = E2_PGSIZE-1
 
 ;EVENT RELATED DECLARATION
 MAXEVENT        = 30
@@ -241,16 +242,16 @@ MAXPARAMS = 9                           ; Numero di impostazioni utilizzate
 ;**************
 ;******* Bank 4                         ; I2C bus manager
 ;**************
-TOT_LENGHT := RR78
+TOT_LENGHT :=  R78
 SLAVE_W    :=  R77                      ; Write slave control byte
 SLAVE_R    :=  R76                      ; Read slave control byte
-SLAVE_AH   :=  R75
-SLAVE_AL   :=  R74
-SLAVE_ABS  := RR74                      ; Absolute address in slave mem.
-COUNTER    := RR72                      ; Bytes already transferred.
-counter    :=  rr8
-LENGHT     := RR70                      ; Number of bytes to be transfert.
-lenght     :=  rr6
+SLAVE_AL   :=  R75
+SLAVE_AH   :=  R74
+SLAVE_LIN  := RR74                      ; Linear address in slave memory.
+POINTER    := RR72                      ; Transfer buffer pointer.
+pointer    :=  rr8
+LENGHT     :=  R70                      ; Number of bytes to be transfert.
+lenght     :=  r6
 I2C_SLAVE  :=  R69                      ; Slave control byte.
 SPI_STAT   :=  R68                      ; SPI transfer status.
 SLAVE_STAT :=  R67                      ; Slave status.
@@ -530,28 +531,12 @@ init::
 	call    _8880_init
    call    _1420_init
 
-   led1    on
-   led2    on
-   backlight on
+   led1    off
+   led2    off
+   backlight off
 
    clr     EIPR
-
-   WD_stop
    ei
-
-   ld      (i2c_buffer+0),#0x10
-   ld      (i2c_buffer+1),#0x20
-   ld      (i2c_buffer+2),#0x30
-   ld      (i2c_buffer+3),#0x40
-   ld      (i2c_buffer+4),#0x50
-   ld      (i2c_buffer+5),#0x60
-tag1::
-   I2C WRITE,E2_SLAVE,#0x8D,#6
-tag2::
-   I2C READ,E2_SLAVE,#0x8D,#6
-tag3::
-   nop
-   nop
 
 diagnose::
    print   #line1, #msg_diag
@@ -590,9 +575,6 @@ diagnose::
    }
    sleep   #1000
 
-   led1    off
-   led2    off
-   backlight off
    call    display_bufclr
 
 
@@ -1353,9 +1335,9 @@ _SPI_int::
    if [SPI_STAT == #TRANS_DRD]
    {
       ld    temp,SPIDR         
-      ld    i2c_buffer(counter),temp
-      incw  counter
-      decw  lenght
+      ld    i2c_buffer(pointer),temp
+      incw  pointer
+      dec   lenght
       if    [SETZ]
       {
          call  GEN_STOP   
@@ -1395,15 +1377,15 @@ _SPI_int::
 				} else {
 					spp	#0
                ld    SPI_STAT,#TRANS_DWR
-               ld    temp,i2c_buffer(counter)
+               ld    temp,i2c_buffer(pointer)
             } 
          case  #TRANS_DWR:
 				spp	#0
-            incw  counter
-            decw  lenght  
+            incw  pointer
+            dec   lenght  
             if    [CLZ]
             {
-               ld    temp,i2c_buffer(counter)
+               ld    temp,i2c_buffer(pointer)
             } else {  
                call  GEN_STOP
                or    SLAVE_STAT,#SLAVE_READY   
@@ -1510,10 +1492,10 @@ display_bufclr::
 	ret
 
 display_update:
-   pushuw  rr0
-   pushuw  rr2
-   pushuw  rr8
-   pushuw  rr10
+;   pushuw  rr0
+;   pushuw  rr2
+;   pushuw  rr8
+;   pushuw  rr10
 	;***********************
 	call    _display_ready
    ld      P0D,#01001111b                    ; scrittura istruzioni
@@ -1541,10 +1523,10 @@ display_update:
 		ld      r0,(rr8)+
 		call    _display_write
 	}
-   popuw   rr10
-   popuw   rr8
-   popuw   rr2
-   popuw   rr0
+;   popuw   rr10
+;   popuw   rr8
+;   popuw   rr2
+;   popuw   rr0
 	;*********************** 
 	ret
 
@@ -1622,7 +1604,7 @@ _display_ready::
 ;   ;***********************
 ;   ld      P0D,#01011111b          ; modo instruzioni & read
 ;   ;***********************
-;   ld     r2,#0FFh
+;   ld     r2,#0xFF
 ;   loop [r2] {
 ;      call    _display_read
 ;      ifbit   r0,#10000000b        ; controlla il BF
@@ -1969,43 +1951,72 @@ _frame_sample::
 ;*********** I2C bus operations on slaves
 ;****************************************
 _i2c_transfer::
-   pushu   PPR                             ; critical section begin
+   pushu   PPR
+   pushuw  rr0
    spp     #0
    spi_di
-   ifw [SLAVE_ABS > #255]                 
-   {                                     
-      and     SLAVE_AL,#00000111b
-      rol     SLAVE_AL
-      or      SLAVE_W,SLAVE_AL
+
+   ifw [SLAVE_LIN > #255]                     ; For extended addresses
+   {                                          
+      and     SLAVE_AH,#00000111b             ; calculate the control byte
+      rol     SLAVE_AH                        ; from the linear address
+      or      SLAVE_W,SLAVE_AH
    }
-   ld      SLAVE_ADDR,SLAVE_AH
-   ld      SLAVE_R,SLAVE_W                 ; Slave read/write slave
-   or      SLAVE_R,#1
-   ldw     TOT_LENGHT,LENGHT               ; Save LENGHT before decrement.
-   ldw     COUNTER,#0
-   ifbit   SLAVE_STAT,#SLAVE_READY         ; Test if bus is free
-      switch [SLAVE_OP] {
-         case  #READ:
-            zero     i2c_buffer,#16        ; zeros the buffer
-            call     GEN_START             ; SPI and interrupt init
-            ld       SPI_STAT,#TRANS_CTRL  ; Slave address
-            ld       SLAVE_STAT,#READING   ; Start read condition
-            ld       SPIDR,SLAVE_W         ; write mode address
-         case  #VERIFY:
-            call     GEN_START             ; SPI and interrupt init
-            ld       SPI_STAT,#TRANS_CTRL  ; Slave address
-            ld       SLAVE_STAT,#VERIFYING ; Start verify condition
-            ld       SPIDR,SLAVE_R         ; read mode address
-         case  #WRITE:
-            call     GEN_START             ; SPI and interrupt init
-            ld       SPI_STAT,#TRANS_CTRL  ; Slave address
-            ld       SLAVE_STAT,#WRITING   ; Start write condition
-            ld       SPIDR,SLAVE_W         ; write mode address
+   ld      SLAVE_R,SLAVE_W                    
+   or      SLAVE_R,#1                         
+
+   ld      SLAVE_ADDR,SLAVE_AL                ; Slave initial address
+   ldw     POINTER,#0                         ; Init the buffer pointer
+
+   ld      TOT_LENGHT,LENGHT                  ; Save LENGHT before decrement
+
+   do {
+      ld      r0,SLAVE_ADDR                   ; Paged Write management
+      and     r0,#E2_PGMASK                   ; Recalculate lenght if 
+      ld      r1,#E2_PGSIZE                   ; address not page aligned
+      sub     r1,r0                           
+      if [[SLAVE_OP == #WRITE] && [r0 > #0] && [LENGHT > r1]]
+      {                                       
+         ld      LENGHT,r1      ; LENGHT' = PGSIZE - ( ADDR & PGSIZE - 1 )
+      } else {                                
+         ld      r1,TOT_LENGHT  ; LENGHT' = TOT_LENGHT
       }
-   }
-   waitbit SLAVE_STAT,#SLAVE_READY
-   delay   #2300
-   popu    PPR                             ; critical section end
+      ifbit   SLAVE_STAT,#SLAVE_READY         ; Test if bus is free
+         switch [SLAVE_OP] {
+            case  #READ:
+               zero     i2c_buffer,#16        ; zeros the buffer
+               call     GEN_START             ; SPI and interrupt init
+               ld       SPI_STAT,#TRANS_CTRL  ; Slave address
+               ld       SLAVE_STAT,#READING   ; Start read condition
+               ld       SPIDR,SLAVE_W         ; write mode address
+            case  #VERIFY:
+               call     GEN_START             ; SPI and interrupt init
+               ld       SPI_STAT,#TRANS_CTRL  ; Slave address
+               ld       SLAVE_STAT,#VERIFYING ; Start verify condition
+               ld       SPIDR,SLAVE_R         ; read mode address
+            case  #WRITE:
+               call     GEN_START             ; SPI and interrupt init
+               ld       SPI_STAT,#TRANS_CTRL  ; Slave address
+               ld       SLAVE_STAT,#WRITING   ; Start write condition
+               ld       SPIDR,SLAVE_W         ; write mode address
+         }
+      }
+      waitbit SLAVE_STAT,#SLAVE_READY
+      if [SLAVE_OP == #WRITE]                 
+      {                                       
+         ld      LENGHT,TOT_LENGHT            ; LENGHT'' = LENGHT - LENGHT'
+         sub     LENGHT,r1
+         ld      r0,SLAVE_ADDR                ; Realign the address on
+         and     r0,#~E2_PGMASK               ; the next page
+         add     r0,#E2_PGSIZE
+         ld      SLAVE_ADDR,r0
+      }
+      delay   #2300                           ; 5ms delay
+
+   } while [LENGHT != #0]
+
+   popuw   rr0
+   popu    PPR                                
    ret
 
 ;****************************************
@@ -2157,22 +2168,19 @@ rom_check::
       ld      (rr4)+,r7
       ld      (rr4)+,r6
       ei
-      sleep   #3000
+      sleep   #2000
    }
    ret
 
 
 e2_check::
-   ldw     (i2c_buffer),#0
-   ldw     (i2c_buffer+2),#0
-   I2C READ,E2_SLAVE,#0,#4
-   ifw [[(i2c_buffer) == #0xFFFF] && [(i2c_buffer+2) == #0xFFFF]]
+   I2C READ,E2_SLAVE,#0,#2
+   ifw [(i2c_buffer) == #0xFFFF]
    {
       or      r0,#DIAG_E2EMPTY
-   } else {
-      ifbit SLAVE_STAT, #NO_ACK
-         or      r0,#DIAG_E2FAIL
-      }
+   }
+   ifbit SLAVE_STAT, #NO_ACK
+      or      r0,#DIAG_E2FAIL
    }
    ret
 
@@ -2184,7 +2192,7 @@ rtc_check::
    } else {
      ld       RTCFLAG,#1
    }
-   if [(i2c_buffer+7) == #0x1E]
+   if [(i2c_buffer+7) != #0xE0]
    {
       ld   (i2c_buffer+0),#0x0
       ld   (i2c_buffer+1),#0x0
@@ -2195,10 +2203,10 @@ rtc_check::
       ld   (i2c_buffer+7),#0xE0
       I2C WRITE,RTC_SLAVE,#0,#8
    }
-   if [[RTCFLAG == #1] && [(i2c_buffer+7) != #0xE0]]
-   {
-      or      r0,#DIAG_RTCFAIL
-   } 
+;   if [[RTCFLAG == #1] && [(i2c_buffer+7) != #0xE0]]
+;   {
+;      or      r0,#DIAG_RTCFAIL
+;   } 
    ret
 
 
@@ -2208,6 +2216,7 @@ rtc_check::
 ;**************************************************************************
 
 defaults::
+   zero    i2c_buffer,#16
    ldw     rr2,#0
    ld      r8,#(E2_SIZE / 16)
    loop [r8]
@@ -2421,7 +2430,7 @@ rtc_write::
 
 rtc_start::
    I2C READ,RTC_SLAVE,#0,#1
-   and     (i2c_buffer),#~80h
+   and     (i2c_buffer),#~0x80
    I2C WRITE,RTC_SLAVE,#0,#1
    ret
 
@@ -3584,7 +3593,7 @@ msg_evreply:            .ascii  "    avvenuta    "
 ;************************* Fine ROM - Checksum ****************************
 ;**************************************************************************
 
-;                        .org    (ROMSIZE - 8)
+                        .org    (ROMSIZE - 8)
 pattern::               .byte   0x55,0xAA
 serial::                .byte   1,0,0,0
 checksum::              .byte   0xFF,0xFF

@@ -143,6 +143,6 @@ ispi    = ib0m
 ;***************************************
 .macro P1_PAGE
    .ifc df EMU
-   spp         #P7D_PG
+   spp      #P7D_PG
    .endc
 .endm

@@ -208,8 +208,8 @@
    ld      SLAVE_STAT,#SLAVE_READY
    ld      SLAVE_OP,#op
    ld      SLAVE_W,#slave
-   ldw     LENGHT,lenght
-   ldw     SLAVE_ABS,addr
+   ld      LENGHT,lenght
+   ldw     SLAVE_LIN,addr
    call    _i2c_transfer
 .endm
 ;************************
