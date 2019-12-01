@@ -1,13 +1,6 @@
 ;****************************************************************************
 ;**************************** macro list ************************************
 ;****************************************************************************
-;* set_bit              dest,#mask      ;
-;* clr_bit              dest,#mask      ;
-;* cpl_bit              dest,#mask      ;
-;* ld_mm                dst,src         ; memory to memory byte load
-;* ldw_mm               dst,src         ; memory to memory word load
-;* clrw                 op              ; clear word
-;* cpl2_w               wr              ; 2 complement word
 ;* T0_start                             ; start T0 timer
 ;* T0_stop                              ; stop T0 timer
 ;* delay                us              ; ritardo di xxxxx us (fino 65535)
@@ -18,51 +11,22 @@
 ;* led2                 on/off          ; accende/spegne il led 2
 ;* backlight            on/off          ; accende/spegne il backlight
 ;* mute                 on/off          ; attiva/disattiva il muting
+;* MC118                on/off          ; attiva/disattiva MC34118
+;* MC119                on/off          ; attiva/disattiva MC34119
 ;* spi_di                               ; disable SPI interrupt
 ;* spi_ei                               ; enable SPI interrupt
 ;* remote_di                            ; disable REMOTE interrupt
 ;* remote_ei                            ; enable REMOTE interrupt
 ;* _8880_di                             ; disable MT8880 interrupt
 ;* _8880_ei                             ; enable MT8880 interrupt
-;* byte2bcd             byte,bcd10,bcd1 ; byte to BCD (F,F)
-;* bcd2byte             bcd10,bcd1,byte ; BCD (F,F) to byte
+;* byte2nibble          byte,nb10,nb1   ; byte to nibbles (F,F)
+;* nibble2byte          nb10,nb1,byte   ; nibbles (F,F) to byte
 ;* I2C            opr,slave,addr,lenght ; read/write/verify i2c slaves
 ;* zero                 address,lenght  ; zeros a buffer of lenght bytes
-;* byte2dec             byte,bcd10,bcd1 ; byte to BCD (9,9)
+;* byte2bcd             byte,bcd10,bcd1 ; byte to BCD (9,9)
+;* bcd2byte             bcd10,bcd1,byte ; BCD to byte (9,9)
 ;****************************************************************************
 
-;************************             
-.macro  set_bit dest,mask                       ;\
-   or      dest,#mask                           ; |
-.endm                                           ; |
-;************************                       ; | Bit macro
-.macro  clr_bit dest,mask                       ; | with immediate
-   and     dest,#~mask                          ; | mask
-.endm                                           ; | 
-;************************                       ; | 
-.macro  cpl_bit dest,mask                       ; |
-   xor     dest,#mask                           ; | 
-.endm                                           ;/ 
-;************************                       
-.macro  ld_mm   dst,src                         ;\  Make a byte memory to
-   ld      r0,src                               ; | memory load with immediate
-   ld      dst,r0                               ; | address
-.endm                                           ;/  
-;************************                       
-.macro  ldw_mm  dst,src                         ;\  Make a word memory to
-   ldw     rr0,src                              ; | memory load with immediate
-   ldw     dst,rr0                              ; | address
-.endm                                           ;/  
-;************************                       
-.macro  clrw    op
-	xorw    op,op
-.endm
-;************************                       
-.macro  cpl2_w  wr                              ;\
-   cpl     r#wr                                 ; |
-   cpl     r#(wr+1)                             ; | 2 complememt word
-   incw    rr#wr                                ; |
-.endm                                           ;/
 ;************************                       
 .macro  T0_start
 	pushu   PPR
@@ -133,14 +97,12 @@
 .macro   _8880_di       
    and   EIPR,#~ip8880
    and   EIMR,#~i8880
-   ld    DTMF_S,#0
 .endm
 ;************************
 .macro   _8880_ei
    and   EIPR,#~ip8880  
 	nop
    or    EIMR,#i8880    
-   ld    DTMF_S,#1
 .endm
 ;************************
 .macro   relay1 status
@@ -203,34 +165,53 @@
    .endc
 .endm
 ;************************
-.macro byte2bcd byte,bcd10,bcd1
-   ld      bcd1,byte
-   and     bcd1,#0Fh
-   ld      bcd10,byte
-   and     bcd10,#0F0h
-   swap    bcd10
+.macro   MC118 status
+   pushu   PPR
+   P1_PAGE
+   .ifc ne status
+      or      P1D,#PD118
+   .endc
+   .ifc eq status
+      and     P1D,#~PD118
+   .endc
+   popu    PPR
+   ret
 .endm
 ;************************
-.macro bcd2byte bcd10,bcd1,byte
-   ld      byte,bcd10
+.macro   MC119 status
+   pushu   PPR
+   P1_PAGE
+   .ifc ne status
+      or      P1D,#PD119
+   .endc
+   .ifc eq status
+      and     P1D,#~PD119
+   .endc
+   popu    PPR
+   ret
+.endm
+;************************
+.macro byte2nibble byte,nb10,nb1
+   ld      nb1,byte
+   and     nb1,#0Fh
+   ld      nb10,byte
+   and     nb10,#0F0h
+   swap    nb10
+.endm
+;************************
+.macro nibble2byte nb10,nb1,byte
+   ld      byte,nb10
    swap    byte
-   or      byte,bcd1
+   or      byte,nb1
 .endm
 ;************************
 .macro I2C op,slave,addr,lenght
-   pushu   PPR
-   spp     #0
-   clr     EIPR
-   pushu   EIMR
-   clr     EIMR
    ld      SLAVE_STAT,#SLAVE_READY
    ld      SLAVE_OP,#op
    ld      SLAVE_W,#slave
    ldw     LENGHT,lenght
    ldw     SLAVE_ABS,addr
    call    _i2c_transfer
-   popu    EIMR
-   popu    PPR
 .endm
 ;************************
 .macro bcd2ascii bcd,ascii
@@ -280,7 +261,7 @@
    }
 .endm
 ;************************
-.macro byte2dec byte,bcd10,bcd1
+.macro byte2bcd byte,bcd10,bcd1
    ld      bcd10,#0
    while [byte > #9]
    {
@@ -288,6 +269,18 @@
       sub     byte,#10
    }
    ld      bcd1,byte
+.endm
+;************************
+.macro bcd2byte bcd10,bcd1,byte
+   pushuw  rr14
+   ld      byte,bcd10
+   ld      r14,#9
+   ld      r15,byte
+   loop [r14] {
+      add byte,r15
+   }
+   add     byte,bcd1
+   popuw   rr14
 .endm
 ;************************
 

@@ -15,7 +15,7 @@
 ;*              * Static data define                                      *
 ;*              * Data section define                                     *
 ;*                                                                        *
-;* VERSION                : 0.9.2B                                        *
+;* VERSION                : 0.9.3B                                        *
 ;*                                                                        *
 ;*                                                                        *
 ;* LAST REVISION          : 09/09/97                                      *
@@ -29,7 +29,7 @@
                         .list           me      
                         .page
 
-;                        EMU      =      1
+                        EMU      =      1
 
 ;**************************************************************************
 ;**************************** Include section *****************************
@@ -90,32 +90,29 @@ VERIFYING    == 2                   ; Slave is reading the current byte.
 WRITING      == 3                   ; Slave is programming a byte.
 NO_ACK       == 4                   ; Slave has not acknowledged.
 
-SLAVE_READY  == 80h                 ; Slave is ready for a new operation...
+SLAVE_READY  == 0x80                ; Slave is ready for a new operation...
 
 
 ;DTMF/LINETONE DEFINES
-DTMFAVLB        = 00000100b
-DTMFINOUT       = 00000101b
-DTMFTONE        = 00000110b
 TONEHIZ         = 0
 TONEDIAL        = 1
 TONEPBX         = 2
 TONEBUSY        = 3
 ZERO            = 10
 
-;E2PROM MEMORY LOCATIONS
-E2_CHECKSUM     = 0
-E2_SERIAL       = 2
-E2_REMOTE       = 6
-E2_SETUP        = 16
-E2_NUMERS       = 480
-E2_EVENTS       = 608
-E2_SIZE         = 2048
-
-
 ;MENUS/KEYPAD DECLARATION
 FORWBACK        = 11
 CONFIRM         = 12
+
+
+;E2PROM MEMORY LOCATIONS
+E2_CHECKSUM     = 0
+E2_SERIAL       = 2
+E2_SETUP        = 8
+E2_REMOTE       = 32
+E2_NUMERS       = 480
+E2_EVENTS       = 608
+E2_SIZE         = 2048
 
 ;EVENT RELATED DECLARATION
 MAXEVENT        = 30
@@ -128,9 +125,21 @@ EV_END          = 6
 EV_HOW          = 7
 EVALARM         = 4
 EVREMOTE        = 8
+EVTIMEOUT       = 16
+EVRING          = 32
 EVRESET         = 4
 EVDIGIT         = 8
+EVEND           = 16
 
+;DIAGNOSTIC ERRORS
+DIAG_OK         = 0
+DIAG_E2EMPTY    = 1
+DIAG_E2FAIL     = 2
+DIAG_ROMFAIL    = 4
+DIAG_8880FAIL   = 8
+DIAG_RTCFAIL    = 16
+DIAG_TIMEFAIL   = 32
+DIAG_COREFAIL   = 128
 
 ;**************************************************************************
 ;**************** Internal register variable allocations ******************
@@ -450,7 +459,6 @@ st9$entry_GO::                                  ;
    .endc
    .ifc ndf EMU
    ld      eitr,#00001101b                 ; Set int triggers
-;   ld      eiplr,#11100001b                ; Interrups priority (B-A-C-D)
    ld      eiplr,#11011000b                ; Interrups priority (A-C-B-D)
    ld      eivr,#01010100b                 ; Set int_vect=5X / NMI
    .endc
@@ -481,15 +489,15 @@ st9$entry_GO::                                  ;
 ;***************************************
 ;****************************** init SCI
 ;***************************************
-;   spp     #SCI1_PG                        ; Set SCI page register
-;   ld      s_brghr,#00                     ; Set baud_rate=19.200
-;   ld      s_imr,#00h                      ; Set int mask register
-;   ld      s_ivr,#SCI_IVR                  ; SCI interrupt vector
-;   ld      s_idpr,#00h                     ; Set interrupt priority=2
-;   ld      s_chcr,#(wl8 | sb10)            ; 8 data, 1 stop, no parity
-;   ld      s_ccr,#0                        ; 16X, internal baud rate
-;   clr     s_isr                           ; Clr pending interrupt
-;   ldw     s_brgr,#39                      ; Set baud_rate=19.200 (24Mhz)
+   spp     #SCI1_PG                        ; Set SCI page register
+   ld      s_brghr,#00                     ; Set baud_rate=19.200
+   ld      s_imr,#00h                      ; Set int mask register
+   ld      s_ivr,#SCI_IVR                  ; SCI interrupt vector
+   ld      s_idpr,#00h                     ; Set interrupt priority=2
+   ld      s_chcr,#(wl8 | sb10)            ; 8 data, 1 stop, no parity
+   ld      s_ccr,#0                        ; 16X, internal baud rate
+   clr     s_isr                           ; Clr pending interrupt
+   ldw     s_brgr,#39                      ; Set baud_rate=19.200 (24Mhz)
 
 
 ;***************************************
@@ -522,55 +530,51 @@ init::
    led2    off
    backlight off
 
-   ld      DTMF_S,#0
-
    clr     EIPR
 
    ei
 
 diagnose::
-   print   #line1, #message_diag
+   print   #line1, #msg_diag
    call    rom_check
-   if [r0 == #1]
-   {
-      ldw     rr4,#msg_romfail
-      led2    on
-   } else {
-      ldw     rr4,#msg_romok
-   }
-   print   #line2, rr4
-   sleep   #1000
    call    e2_check
-   if [r0 == #1]
-   {
-      ldw     rr4,#msg_e2fail
-      led2    on
-   } else {
-      ldw     rr4,#msg_e2ok
-   }
-   print   #line2, rr4
-   sleep   #1000
    call    rtc_check
-   if [r0 == #1]
-   {
-      ldw     rr4,#msg_rtcfail
-   } else {
-      ldw     rr4,#msg_rtcok
+   ifbit r0,#DIAG_ROMFAIL
+      print   #line2, #msg_romfail
+      led2    on
+      sleep   #1000
+;      halt
    }
-   print   #line2, rr4
-   sleep   #1000
-
-   call    display_bufclr
-
+   ifbit r0,#DIAG_E2EMPTY
+      call    defaults
+      ldw     (remote_buffer),#0
+      call    remote_save
+      call    save_setup
+;      jx      progr
+   }
+   ifbit r0,#DIAG_E2FAIL
+      print   #msg_diagfail, #msg_e2fail
+      led2    on
+      sleep   #1000
+      halt
+   }
+   ifbit r0,#DIAG_RTCFAIL
+      print   #line2, #msg_rtcfail
+;      led2    on
+      sleep   #1000
+;      halt
+   }
+   if [[r0 == #0] || [r0 == #DIAG_RTCFAIL]]
+   {        
+      print   #line2, #msg_allok
+   }
    if [RTCFLAG != #0]
    {
       call    rtc_start
    }
+   sleep   #1000
+   call    display_bufclr
 
-   if [r15 == #1]
-   {
-      jx   progr
-   } 
 
 idle::
    T0_stop
@@ -601,8 +605,15 @@ idle::
    relay1  off
    relay2  off
    mute    on
-   
-   print   #message_ready,#message_time
+   sleep   #100
+
+   print   #message_ready
+   if [RTCFLAG != #0]
+   {
+      print   #line2, #message_time
+   } else {
+      print   #line2, #msg_rtcno
+   } 
    while [[IGNORE == #1] && [PHONE == #1]]
    {
       call    clock
@@ -629,134 +640,134 @@ main::
          print    #line2, #message_alrem
          jx       allarme
       }
-      if [RTCFLAG != #0]
-      {
-         call     clock
-      }
       if [RINGS >= MAXRING]
       {
          print    #line2, #message_alring
          jx       allarme
       }
+      call     clock
    }
 
 
-allarme::
+allarme::                                      ; inizio ciclo di allarme
    T0_stop
    remote_di
-   led1    on
+   led1    on                                  ; segnalazione visiva
 
    print   #line1, #message_alarm
-   call    event_begin
+;   call    event_begin                         ; registrazione inizio
 
-   ifbit SWITCH, #RESET
-     call     event_end
+   ifbit SWITCH, #RESET                        ; primo reset check
+;     call     event_end                        ; registro la fine del ciclo
      jx       annullamento
    }
-   relay1  on
+   relay1  on                                  ; prendo la linea telefonica
    sleep   #1000
 
-   if [RINGS >= MAXRING]
+   if [RINGS >= MAXRING]                       ; se e' una chiamata entrante
    {
-       jx      ingoing
+       jx      ingoing                         ; salto la composizione
    }
 
-   ld     r2,#0
-   ld     r13,REPT
-
+recycle::
+   ld     r2,#0                                ; indice del numero telefonico
+   ld     r13,REPT                             ; numero di ripetizioni
+   
 retry::
-   relay1  on
-   sleep   #1000
+   relay1  on                                  ; in caso di telefonate 
+   sleep   #1000                               ; successive riprendo la linea
 
-   if [r2 > #8]
+   if [r2 > #8]                                ; se ho finito i numeri
    {
-      ld      r2,#0
+      ld      r2,#0                            ; ricomincio daccapo
       ld      r13,REPT
    } 
    ld      r0,r2
-   call    event_number
-   call    number_read
-   dec     r13
-   if [r13 == #0]
+   call    number_read                         ; leggo il numero memorizzato
+;   call    event_number                        ; registro il numero chiamato
+   dec     r13                                 ; avvenuta ripetizione
+   if [r13 == #0]                              ; se ho finito di ripetere
    {
-      inc     r2
+      inc     r2                               ; passo al numero successivo
    }
-   if [(number) == #0]
+   if [(number) == #0]                         ; se il numero e' mancante
    {
-      jx       retry
+      jx       retry                           ; salto al successivo
    }
 
-   call    combtel
+   call    combtel                             ; compongo il numero
 
-   ifbit SWITCH, #RESET
-     call     event_end
+   ifbit SWITCH, #RESET                        ; secondo reset check
+;     call     event_end                        ; registro la fine del ciclo
      jx       annullamento
    }
 
-   sleep   #2000
+   sleep   #2000                               ; attesa di 2 sec. 
 
-   call    _tone_sample
-   if [r0 == #TONEBUSY]
+   call    _tone_sample                        ; controllo tono della linea
+   if [r0 == #TONEBUSY]                        ; se occupato attacco....
    {
-      relay1  off
-      ld      COUNTCLK,PAUSE
-      call    T0_COUNTER
+      relay1  off                               
+      ld      COUNTCLK,PAUSE                   ; faccio una pausa
+      call    T0_COUNTER                       ; impostata dall'utente
       while [COUNTCLK != #0]
       {
-         ifbit SWITCH, #RESET
-            call  event_end
+         ifbit SWITCH, #RESET                  ; durante la pausa c'e'
+;            call  event_end                    ; un reset check
             jx    annullamento
          }
       }     
-      jx   retry
+      jx   retry                               ; e poi ricomincio
    }
 
 ingoing::
 
-
-   ld      r0,#1100b
+   ld      r0,#1100b                           ; reimposto l'8880
    call    _8880_ctrl_wr
-   ld      r0,#0000b
+   ld      r0,#0000b                           
    call    _8880_ctrl_wr
 
-   _8880_ei
+   _8880_ei                                    ; per ricevere i DTMF
 
    ld      DIGIT,#0
-   ld      COUNTCLK,MAXCONF
-   call    T0_COUNTER
+   ld      COUNTCLK,MAXCONF                    ; nel tempo massimo
+   call    T0_COUNTER                          ; stabilito dall'utente
    
-   loop {
+   loop {                                      ; lancio il messaggio
     
-      call    _1420_reset
+      call    _1420_reset                      ; reset del 1420
       sleep   #100
 
-      call    _1420_play
-      sleep   #10000
-      call    _1420_stop
+      call    _1420_play                       ; play del messaggio
 
-      ifbit SWITCH, #RESET
-         call     event_end
+                                               ; qui faccio un reset check
+      sleep   #10000                           ; durata del messaggio
+
+      call    _1420_stop                       ; fine messaggio
+
+      ifbit SWITCH, #RESET                     ; reset check
+;         call     event_end
          jx       annullamento
       }
-      if [DIGIT == USRDGT]
+      if [DIGIT == USRDGT]                     ; mi fermo se ricevo il tono
       {
          break
       }
 ;      call    _tone_sample
 ;      if [[COUNTCLK == #0] [r0 == #TONEBUSY]]
-      if [COUNTCLK == #0]
+      if [COUNTCLK == #0]                      ; ma se e' finito il tempo
       {
-         relay1  off
+         relay1  off                           ; sgancio la linea
          ld      COUNTCLK,PAUSE
-         call    T0_COUNTER
+         call    T0_COUNTER                    ; e faccio una pausa
          while [COUNTCLK != #0]
          {
-            ifbit SWITCH, #RESET
-               call  event_end
+            ifbit SWITCH, #RESET               ; durante la quale c'e'
+;               call  event_end                 ; un reset check
                jx    annullamento
             }
          }
-         jx   retry
+         jx   retry                            ; poi ricomincio
       }
    }
 
@@ -768,10 +779,10 @@ ingoing::
    ld      DIGIT,#0
 ;   ld      COUNTCLK,#
 ;   call    T0_COUNTER
-   mute    off
+   mute    off                                 ; attivazione vivavoce
 
-   loop {
-      if [DIGIT == USRDGT]
+   loop {                                      ; fino alla ricezione 
+      if [DIGIT == USRDGT]                     ; di un nuovo tono
       {
          break
       }
@@ -782,11 +793,11 @@ ingoing::
 ;         break
 ;      }
       ifbit SWITCH, #RESET
-         call     event_end
+;         call     event_end
          jx       annullamento
       }
    }
-   call     event_end
+;   call     event_end
    relay1  off
    print   #message_alarm, #message_ok
    sleep   #2000
@@ -867,8 +878,7 @@ progr::
    {
       ld      r15,#3
    }
-;   .menu r15
-   .menu #5
+   .menu r15
       .display #0, menu_messaggi,     message_tastipr
       .display #1, menu_numeri,       message_tastipr
       .display #2, menu_telecomando,  message_tastipr
@@ -910,15 +920,15 @@ menu_remote::
       .display #2, menu_preced1,      menu_preced2
       .action  #0
                   print   #sub_remhit1, #sub_remhit2
-                  ldw     rr2,#frame_buffer
-                  ldw     (rr2),#0
+                  ldw     rr6,#frame_buffer
+                  ldw     (rr6),#0
                   ldw     rr8,#200
                   remote_ei
                   loopw [rr8]
                   {
                      sleep   #100
-                     ldw     rr2,(frame_buffer)
-                     ifw [rr2 != #0]
+                     ldw     rr6,(frame_buffer)
+                     ifw [rr6 != #0]
                      {
                         break
                      }
@@ -927,18 +937,17 @@ menu_remote::
                      }
                   }
                   remote_di
-                  ifw [rr2 == #0]
+                  ifw [rr6 == #0]
                   {
                      print   #sub_remfail1, #sub_remfail2
-                     sleep   #1000
+                     sleep   #2000
                   } else {
-                     ldw     rr2,#i2c_buffer
-                     ldw     rr4,#frame_buffer
-                     lddd    (rr2)+,(rr4)+
-                     lddd    (rr2)+,(rr4)+
-                     I2C WRITE,E2_SLAVE,#E2_REMOTE,#2
+                     ldw     rr6,#frame_buffer
+                     ldw     rr8,#remote_buffer
+                     ldw     (rr8),(rr6)
                      print   #line1, #sub_remok
                      call    remote
+                     call    remote_save
                      sleep   #2000
                   }
       }
@@ -1102,7 +1111,7 @@ menu_events::
 
 
 ;***************************************
-;************************ T0 interrupt 0
+;******** Multifunction Timer interrupts
 ;***************************************
 _T0_int_0::
    push  PPR
@@ -1119,72 +1128,14 @@ _T0_int_0::
    pop   PPR
 	iret                                    
 
-
-;***************************************
-;************************ T0 interrupt 1
-;***************************************
 _T0_int_1::
-;   pushw   RPP                             ; Save RPP
-;   push    PPR                             ; Save PPR
-;   srp     #(3*2)                          ; Switch context
-;   ;***********************                
-;   spp     #T0D_PG                         ; Enable Timer0 page
-;   and     T_FLAGR,#~(ouf | cp0 | cp1)     ; Clear Overflow/Underflow/Capture
-;   spp     #0
-;   ;***********************
-;   inc     REM_F
-;   ifbit   P2DR,#REMOTE
-;      inc      REM_C
-;   }
-;   if [REM_C > #11]
-;   {
-;      clr      REM_F                       ; Clear remote flags
-;      clr      REM_C                       ; Clear remote flags
-;      clr      EIPR
-;      nop
-;      or       EIMR,#10000001b             ; Re-enable WD and REMOTE
-;      spp      #T0D_PG                     ; Enable Timer0 page
-;      and      T_TCR,#~cen                 ; Stop Timer0
-;      inc      REM_OK                      ; Increment validity flag
-;   }
-;   if [REM_F > #11]
-;   {
-;      clr      REM_F                       ; Clear remote flags
-;      clr      REM_C                       ; Clear remote flags
-;      clr      EIPR
-;      nop
-;      or       EIMR,#10000001b             ; Re-enable WD and REMOTE
-;      spp      #T0D_PG                     ; Enable Timer0 page
-;      and      T_TCR,#~cen                 ; Stop Timer0
-;   }
-;   ;***********************                
-;   pop     PPR                             
-;   popw    RPP                             ; Restore context    
 	iret                                    
 
-
-;***************************************
-;************************ T0 interrupt 2
-;***************************************
 _T0_int_2::
-;   push  PPR
-;   ;***********************                
-;   spp     #T0D_PG                         ; Enable Timer0 page
-;   and     T_FLAGR,#~(ouf | cp0 | cp1)     ; Clear Overflow/Underflow/Capture
-;   spp     #0
-;   ;***********************
-;   or    SLAVE_STAT,#SLAVE_READY           ; Write sequence is finished.
-;   pop   PPR
    iret                                    
 
-
-;***************************************
-;************************ T0 interrupt 3
-;***************************************
 _T0_int_3::
    iret
-
-
 
 
 ;***************************************
@@ -1194,13 +1145,11 @@ _trap_div0::                                    ; Divide by 0 interrupt service 
 	ret
 
 
-
 ;***************************************
 ;******************* Top level interrupt
 ;***************************************
 _top_level_int::                                ; Top Level interrupt service routine
 	iret
-
 
 
 ;***************************************
@@ -1210,13 +1159,11 @@ _SCI_it_s_rec_err::
 	iret
 
 
-
 ;***************************************
 ;***************** SCI 9th bit interrupt
 ;***************************************
 _SCI_9th_bit::
 	iret
-
 
 
 ;***************************************
@@ -1226,13 +1173,11 @@ _SCI_it_transmit::
 	iret
 
 
-
 ;***************************************
 ;********************* SCI RX interrupt
 ;***************************************
 _SCI_it_receive::
 	iret
-
 
 
 ;***************************************
@@ -1303,21 +1248,6 @@ _WD_int::
       inc     TONE_S
    }
    ;***********************
-;   .ifc ndf EMU
-;   if [DTMF_S == #1]
-;   {
-;      call    _8880_ctrl_rd     
-;      ifbit   r0,#0100b         
-;         call    _8880_data_rd
-;         ld      DIGIT,r0
-;      }
-;      ld      r0,#1001b
-;      call    _8880_ctrl_wr
-;      ld      r0,#0000b
-;      call    _8880_ctrl_wr
-;   }
-;   .endc
-   ;***********************
    ;spp     #0
    ;clr     EIPR                            ; WD generate spurious
    ;nop
@@ -1326,6 +1256,7 @@ _WD_int::
    popw    RPP                              ; Restore context
    pop     PPR
 	iret
+
 
 ;***************************************
 ;**************************** MT8880 IRQ
@@ -1434,14 +1365,7 @@ _REM_int::
    ifbit P2DR,#REMOTE                      ; Is here a level 1
       delay   #100
       ifbit P2DR,#REMOTE                   ; after 200 usec
-  ;       and     EIMR,#~10000001b         ; Disable other interrupts
-;        delay   #470
-;        spp     #T0D_PG                   ; 
-;        or      T_FLAGR,#(cp0 | ouf)      ; Trigger CP0 and OUF
-;        or      T_TCR,#cen                ; Start the timer
-  ;       spp     #0
          call    _frame_sample
-  ;       or      EIMR,#10000001b          ; Re-enable other interrupts
       }
    }
 	popw    RPP                             ; Restore context    
@@ -1498,8 +1422,6 @@ display_init::
 	ld      r0,#00000110b                   ; entry mode set
 	call    _display_write
 	ret
-
-
 
 
 ;***************************************
@@ -1654,12 +1576,12 @@ _display_ready::
 ;**************************************************************************
 				    
 combtel::
-;   if [DECADIC == #0]
-;   {
+   if [DECADIC == #0]
+   {
       call    combtel_dtmf
-;   } else {
-;      call    combtel_decadic
-;   }
+   } else {
+      call    combtel_decadic
+   }
    ret
 
 ;****************************************
@@ -1670,10 +1592,10 @@ combtel_decadic::
    do {         
 	   ld      r11,(rr8)+           ; rr8 contiene i numeri
 	   loop [r11] {
-	      clr_bit P5DR,REL1       
-         sleep   #48               ; da calibrare
-	      set_bit P5DR,REL1
-         sleep   #48               ; da calibrare
+         relay1  off       
+         sleep   #40               ; da calibrare
+         relay1  on
+         sleep   #60               ; da calibrare
 	   }
       sleep   #500
    } while [(rr8) != #0]
@@ -1746,7 +1668,6 @@ _8880_data_wr::
 	ret
 
 
-
 ;***************************************
 ;****** write to MT8880 control register
 ;***************************************
@@ -1768,8 +1689,6 @@ _8880_ctrl_wr::
 	ret
 
 
-
-
 ;***************************************
 ;************* read MT8880 data register
 ;***************************************
@@ -1787,12 +1706,10 @@ _8880_data_rd::
    ld      r0,#~O2                 ; 01111111b
    ld      P0D,r0
    ld      r0,r3
-   and     r0,#15                  ; 00001111b        
+   and     r0,#0xF                 ; 00001111b        
    delay   #10
    popu    P0D
 	ret
-
-
 
 
 ;***************************************
@@ -1828,32 +1745,6 @@ _8880_pwd::
    ld      P0D,r1
    pop     P0D
 	ret
-
-;**************************************************************************
-;****************** Attivazione/disattivazione vivavoce *******************
-;**************************************************************************
-
-
-;****************************************
-;****************** Attivazione VIVA VOCE
-;****************************************
-vivavoce_on::
-   pushu   PPR
-   P1_PAGE
-   or      P1D,#(PD118 | PD119)     ; attiva MC34118 e MC34119
-   popu    PPR
-   ret
-
-
-;****************************************
-;*************** Disattivazione VIVA VOCE
-;****************************************
-vivavoce_off::
-   pushu   PPR
-   P1_PAGE
-   and     P1D,#~(PD118 | PD119)    ; disattiva MC34118 e MC34119
-   popu    PPR
-   ret
 
 ;**************************************************************************
 ;****************** Sezione messaggistica vocale **************************
@@ -1934,8 +1825,6 @@ _1420_stop::
 
 _tone_sample::
    spp     #0
-;   ld      r0,#DTMFTONE
-;   call    _8880_ctrl_wr
    ld      r0,#1010b
    call    _8880_ctrl_wr
    ld      r0,#0000b
@@ -1950,8 +1839,6 @@ _tone_sample::
      nop
    }
 
-;   ld      r0,#DTMFINOUT
-;   call    _8880_ctrl_wr
    ld r1,TONE_C
    if [[TONE_C > #11] && [TONE_C < #15]]     ; 11-15 
    {
@@ -1969,6 +1856,12 @@ _tone_sample::
    {
      ld       r0,#TONEHIZ
    }
+
+   ld      r0,#1100b
+   call    _8880_ctrl_wr
+   ld      r0,#0000b
+   call    _8880_ctrl_wr
+
 	ret
 
 
@@ -1978,34 +1871,11 @@ _tone_sample::
 
 
 ;****************************************
-;****************** Programmazione Timer0
-;****************************************
-;T0_remote::        
-;   pushuw  RPP
-;   pushu   PPR
-;   srp     #(15*2)                         ; Set register bank F
-;   spp     #T0D_PG                         ; Set timer0 data page
-;   ld      t_tcr,  #00000000b              ; Set timer control reg
-;   ld      t_tmr,  #00000000b              ; Continuous/Retrigger mode
-;   ld      t_icr,  #00000000b              ; Set input control reg
-;   ld      t_idmr, #10000001b              ; Underflow interrupt
-;   ld      t_prsr,#3                       ; 1 uSec prescaler value
-;   ldw     t_reg0r,#1150                   ; 1150 uSec counter value 
-;
-;   spp     #T0C_PG                         ; Set timer0 control page
-;   ld      t0_ivr,#MFT_IVR+2               ; Set int vector
-;   ld      t0_idcr,#00000001b              ; Set Timer T0 int level=1
-;   popu    PPR
-;   popuw   RPP
-;   ret
-
-;****************************************
 ;*************** Campionamento principale
 ;****************************************
 _frame_sample::
                                            ; time critical section begin
-;   waitbit    P2DR,#REMOTE                ; depends on int triggering
-   waitnobit  P2DR,#REMOTE                 ; depends on int triggering
+   waitnobit  P2DR,#REMOTE                 ; wait the first 0 level
    ldw        rr0,#frame_buffer            ; loads the frame buffer
 	ldw        (rr0),#0                     ; zero the buffer
 	ld         r2,#2                        ; 2 samples of 6 bits
@@ -2036,32 +1906,14 @@ _frame_sample::
 ;***********************************************************************
 
 ;****************************************
-;***************** Programmazione timer 0
-;****************************************
-;T0_I2C::
-;   spp     #T0C_PG                         ; Set timer0 control page
-;   ld      T0_IVR,#MFT_IVR                 ; Set int vector
-;   ld      T0_IDCR,#00000001b              ; Set timer0 int level=x
-;
-;   spp     #T0D_PG                         ; Set timer0 data page
-;   ld      T_TCR,  #00000000b              ; Set timer control reg
-;   ld      T_TMR,  #00000001b              ; Single/Retrigger mode
-;   ld      T_ICR,  #00000000b              ; Set input control reg
-;   ld      T_IDMR, #10000001b              ; Underflow interrupt
-;   ld      T_PRSR, #3                      ; 1 usec prescaler value
-;   ldw     T_REG0R,#5000                   ; 5 msec counter value
-;   decw    TOT_LENGHT
-;   while [CLZ] {
-;      addw    T_REG0R,#5000                ; 5 ms multiplied lenght
-;      decw    TOT_LENGHT
-;   } 
-;   or      T_TCR,  #cen                    ; Start the timer0
-;   ret
-
-;****************************************
 ;*********** I2C bus operations on slaves
 ;****************************************
 _i2c_transfer::
+   pushu   PPR                             ; critical section begin
+   spp     #0
+   clr     EIPR                            
+   pushu   EIMR
+   clr     EIMR
    spi_di
    ifw [SLAVE_ABS > #255]                 
    {                                     
@@ -2093,8 +1945,11 @@ _i2c_transfer::
             ld       SPIDR,SLAVE_W         ; write mode address
       }
    }
+
    waitbit SLAVE_STAT,#SLAVE_READY
    delay   #2300
+   popu    EIMR
+   popu    PPR                             ; critical section end
    ret
 
 ;****************************************
@@ -2213,8 +2068,99 @@ _msleep::
    ret
 
 ;**************************************************************************
+;************************* Routines diagnostiche **************************
+;**************************************************************************
+
+rom_check::
+   ldw     rr0,#0
+   ldw     rr2,#0
+   ldw     rr4,#0
+   di
+   ldw     rr8,#(ROMSIZE/2)-3
+   spm
+   loopw [rr8]
+   {
+      addw    rr2,(rr4)
+      addw    rr4,#2
+   }
+   ei
+checktest::
+   ifw [(checksum) != rr2]
+   {
+      or      r0,#DIAG_ROMFAIL
+   }
+   sdm
+   ret
+
+
+e2_check::
+   ldw     (i2c_buffer),#0
+   ldw     (i2c_buffer+2),#0
+   I2C READ,E2_SLAVE,#0,#4
+pix::
+   ifbit SLAVE_STAT, #NO_ACK
+      or      r0,#DIAG_E2FAIL
+   }
+   ifw [[(i2c_buffer) == #0xFFFF] && [(i2c_buffer+2) == #0xFFFF]]
+   {
+      or      r0,#DIAG_E2EMPTY
+   } 
+   ret
+
+
+rtc_check::
+   zero    i2c_buffer,#8
+   I2C READ,RTC_SLAVE,#0,#8
+   ifbit SLAVE_STAT, #NO_ACK
+     ld       RTCFLAG,#0
+   } else {
+     ld       RTCFLAG,#1
+   }
+   if [(i2c_buffer+7) == #0x1E]
+   {
+      zero i2c_buffer,#8
+      ld   (i2c_buffer+0),#0x0
+      ld   (i2c_buffer+1),#0x0
+      ld   (i2c_buffer+2),#0x14
+      ld   (i2c_buffer+4),#0x01
+      ld   (i2c_buffer+5),#0x07
+      ld   (i2c_buffer+6),#0x75
+      ld   (i2c_buffer+7),#0xE0
+      I2C WRITE,RTC_SLAVE,#0,#8
+   }
+   if [[RTCFLAG == #1] && [(i2c_buffer+7) != #0xE0]]
+   {
+      or      r0,#DIAG_RTCFAIL
+   } 
+   ret
+
+
+
+;**************************************************************************
 ;***************************** Routines varie *****************************
 ;**************************************************************************
+
+defaults::
+   zero    i2c_buffer,#16
+   ldw     rr2,#0
+   ld      r8,#(E2_SIZE / 16)
+   loop [r8]
+   {
+      I2C WRITE,E2_SLAVE,rr2,#16
+      addw    rr2,#16
+   }
+   ld      EVENTS,  #0
+   ld      LASTEV,  #0
+   ld      USRDGT,  #10
+   ld      PBX,     #0
+   ld      DECADIC, #0
+   ld      MAXRING, #9
+   ld      CYCLES,  #1
+   ld      REPT,    #1
+   ld      MAXCONF, #60
+   ld      MAXRES,  #60
+   ld      PAUSE,   #60
+   ret
 
 load_setup::
    pushuw  rr0
@@ -2259,15 +2205,26 @@ save_setup::
    popuw   rr4
    ret
 
+remote_save::
+   pushuw  rr2
+   pushuw  rr4
+   ldw     rr2,#i2c_buffer
+   ldw     rr4,#remote_buffer
+   ldw     (rr2),(rr4)
+   I2C WRITE,E2_SLAVE,#E2_REMOTE,#2
+   popuw   rr4
+   popuw   rr2
+   ret
 
 clock::
-   pushu   r0
-   pushu   r1
-   pushu   r2
-   pushu   r3
-   pushu   r4
-   pushu   r5
-   pushu   r8
+   if [RTCFLAG == #0]
+   {
+      ret
+   }
+   pushuw  rr0
+   pushuw  rr2
+   pushuw  rr4
+   pushuw  rr8
    dec     CLOCK_C
    if [SETZ]
    {
@@ -2284,7 +2241,7 @@ clock::
    {
       ld    r0,(rr4)
       incw  rr4
-      byte2bcd r0,r2,r1
+      byte2nibble r0,r2,r1
       bcd2ascii r1,r1
       bcd2ascii r2,r2
       ld    -(rr6),r1
@@ -2295,36 +2252,30 @@ clock::
       }
    }
    ei
-   popu    r8
-   popu    r5
-   popu    r4
-   popu    r3
-   popu    r2
-   popu    r1
-   popu    r0
+   popuw   rr8
+   popuw   rr4
+   popuw   rr2
+   popuw   rr0
    ret
 
 
 date::
-   pushu   r0
-   pushu   r1
-   pushu   r2
-   pushu   r3
-   pushu   r4
-   pushu   r5
-   pushu   r8
+   pushuw  rr0
+   pushuw  rr2
+   pushuw  rr4
+   pushuw  rr8
    call    rtc_read
    di
    blank   line2
    ldw     rr6,#line2+12
-   ldw     rr4,#rtc_buffer+4
+   ldw     rr4,#rtc_buffer+6
    ld      r8,#47
    ld      r3,#3
    loop [r3]
    {
       ld    r0,(rr4)
-      incw  rr4
-      byte2bcd r0,r2,r1
+      decw  rr4
+      byte2nibble r0,r2,r1
       bcd2ascii r1,r1
       bcd2ascii r2,r2
       ld    -(rr6),r1
@@ -2335,59 +2286,52 @@ date::
       }
    }
    ei
-   popu    r8
-   popu    r5
-   popu    r4
-   popu    r3
-   popu    r2
-   popu    r1
-   popu    r0
+   popuw   rr8
+   popuw   rr4
+   popuw   rr2
+   popuw   rr0
    ret
 
 
 remote::
-   pushu   r0
-   pushu   r1
-   pushu   r2
-   pushu   r3
-   pushu   r4
-   pushu   r5
-   pushu   r6
-   pushu   r8
+   pushuw  rr0
+   pushuw  rr2
+   pushuw  rr4
+   pushuw  rr6
+   pushuw  rr8
    di
    blank   line2
    ldw     rr6,#line2+2
    ldw     rr4,(remote_buffer)
+   ldw     rr8,#remcode_buffer
    ld      r1,#16
    loop [r1] 
    {
       if [[r1 != #16] && [r1 != #8] && [r1 != #9] && [r1 != #1]]
       {
          ld      r2,#48
+         ld      r3,#0
          ifbitw  rr4,#1000000000000000b
             ld      r2,#49
+            ld      r3,#1
          }
          ld      (rr6)+,r2
+         ld      (rr8)+,r3
       }
       rlcw    rr4
    }
    ei
-   popu    r8
-   popu    r6
-   popu    r5
-   popu    r4
-   popu    r3
-   popu    r2
-   popu    r1
-   popu    r0
+   popuw   rr8
+   popuw   rr6
+   popuw   rr4
+   popuw   rr2
+   popuw   rr0
    ret
 
 
 rtc_read::
-   pushu   r0
-   pushu   r1
-   pushu   r2
-   pushu   r3
+   pushuw  rr0
+   pushuw  rr2
    pushu   r4
    I2C     READ,RTC_SLAVE,#0,#8
    ldw     rr0,#i2c_buffer
@@ -2398,18 +2342,14 @@ rtc_read::
       lddd    (rr2)+,(rr0)+
    }
    popu    r4
-   popu    r3
-   popu    r2
-   popu    r1
-   popu    r0
+   popuw   rr2
+   popuw   rr0
    ret
 
 
 rtc_write::
-   pushu   r0
-   pushu   r1
-   pushu   r2
-   pushu   r3
+   pushuw  rr0
+   pushuw  rr2
    pushu   r4
    ldw     rr0,#i2c_buffer
    ldw     rr2,#rtc_buffer
@@ -2419,10 +2359,8 @@ rtc_write::
    }
    I2C     WRITE,RTC_SLAVE,#0,#8
    popu    r4
-   popu    r3
-   popu    r2
-   popu    r1
-   popu    r0
+   popuw   rr2
+   popuw   rr0
    ret
 
 
@@ -2432,82 +2370,6 @@ rtc_start::
 ;   I2C WRITE,RTC_SLAVE,#0,#1
    and     (i2c_buffer),#~80h
    I2C WRITE,RTC_SLAVE,#0,#1
-   ret
-
-
-rom_check::
-   ldw     rr0,#0
-   ldw     rr2,#0
-   ldw     rr4,#0
-   di
-   ldw     rr8,#(ROMSIZE/2)-3
-   spm
-   loopw [rr8]
-   {
-      addw    rr2,(rr4)
-      addw    rr4,#2
-   }
-   ei
-checktest::
-   ld      r0,#0
-   ifw [(checksum) == rr2]
-   {
-      ld      r0,#0
-   }
-   sdm
-   ret
-
-
-e2_check::
-   ld      (i2c_buffer),#0
-   I2C READ,E2_SLAVE,#E2_SERIAL,#2
-   ld      r0,#1
-   ifw [(i2c_buffer) == #0FFFFh]
-   {
-      di
-      spm
-      ldw     rr4,(serial)
-      ldw     rr6,(serial+2)
-      sdm
-      ei
-      ldw     (i2c_buffer),rr4
-      ldw     (i2c_buffer+2),rr6
-      I2C WRITE,E2_SLAVE,#E2_SERIAL,#4
-;      zero    i2c_buffer,#16
-;      ldw     rr2,#0
-;      ld      r8,#(E2_SIZE / 16)
-;      loop [r8]
-;      {
-;         I2C WRITE,E2_SLAVE,rr2,#16
-;         addw    rr2,#16
-;      }
-      ld      r15,#1
-      ld      r0,#0
-   } else {
-      ld      r15,#0
-      ld      r0,#0
-   }
-   ret
-
-
-rtc_check::
-   ld      (i2c_buffer),#0
-   I2C WRITE,RTC_SLAVE,#8,#1
-   ld      (i2c_buffer),#0FFh
-   I2C READ,RTC_SLAVE,#8,#1
-   ld      RTCFLAG,#0
-   ld      r0,#1
-   if [(i2c_buffer) == #0]
-   {
-      I2C READ,RTC_SLAVE,#7,#1
-      if [(i2c_buffer) == #0D0h]
-      {
-         zero i2c_buffer,#16
-         I2C WRITE,RTC_SLAVE,#0,#16
-      }
-      ld      r0,#0
-      ld      RTCFLAG,#1
-   }
    ret
 
 
@@ -2528,7 +2390,7 @@ number_read::
      {
         ld      r3,i2c_buffer(rr12)
         incw    rr12
-        byte2bcd r3,r1,r2
+        byte2nibble r3,r1,r2
         ld      number(rr4),r1
         incw    rr4
         ld      number(rr4),r2
@@ -2557,7 +2419,7 @@ number_write::
       incw    rr4
       ld      r2,number(rr4)
       incw    rr4
-      bcd2byte r1,r2,r3
+      nibble2byte r1,r2,r3
       ld      i2c_buffer(rr6),r3
       incw    rr6
       if [[r1 == #0] || [r2 == #0]]
@@ -2575,8 +2437,7 @@ number_write::
 
 
 number_show::
-   pushu   r0
-   pushu   r1
+   pushuw  rr0
    call    display_bufclr
    print   #line1, #numeri_begin
    ldw     rr4,#15
@@ -2604,14 +2465,12 @@ number_show::
          break
       }
    }
-   popu    r1
-   popu    r0
+   popuw   rr0
    ret
 
 
 number_enter::
-   pushu   r0
-   pushu   r1
+   pushuw  rr0
    call    number_read
    call    display_bufclr
    print   #line1, #numeri_begin
@@ -2647,16 +2506,13 @@ number_enter::
    .input 0,16,32
    .endinput
    call    number_write
-   popu    r1
-   popu    r0
+   popuw   rr0
    ret
 
 
 time_enter::
-   pushu   r0
-   pushu   r1
-   pushu   r2
-   pushu   r3
+   pushuw  rr0
+   pushuw  rr2
    call    rtc_read
    ldw     rr4,#rtc_buffer
    ldw     rr10,#time_buffer+6
@@ -2664,7 +2520,7 @@ time_enter::
    loop [r3] {
       ld      r0,(rr4)
       incw    rr4
-      byte2bcd r0,r2,r1
+      byte2nibble r0,r2,r1
       ld      -(rr10),r1
       ld      -(rr10),r2
    }
@@ -2692,31 +2548,27 @@ time_enter::
       ld      r2,(rr10)
       dtmf2bcd r1,r1
       dtmf2bcd r2,r2
-      bcd2byte r2,r1,r0
+      nibble2byte r2,r1,r0
       ld      (rr4),r0
       incw    rr4
    }
    call    rtc_write
-   popu    r3
-   popu    r2
-   popu    r1
-   popu    r0
+   popuw   rr2
+   popuw   rr0
    ret
 
 
 date_enter::
-   pushu   r0
-   pushu   r1
-   pushu   r2
-   pushu   r3
+   pushuw  rr0
+   pushuw  rr2
    call    rtc_read
-   ldw     rr4,#rtc_buffer+4
+   ldw     rr4,#rtc_buffer+6
    ldw     rr10,#date_buffer+6
    ld      r3,#3
    loop [r3] {
       ld      r0,(rr4)
-      incw    rr4
-      byte2bcd r0,r2,r1
+      decw    rr4
+      byte2nibble r0,r2,r1
       ld      -(rr10),r1
       ld      -(rr10),r2
    }
@@ -2737,7 +2589,7 @@ date_enter::
       .break    9,47
    .endinput        
    call    rtc_read
-   ldw     rr4,#rtc_buffer+4
+   ldw     rr4,#rtc_buffer+6
    ldw     rr10,#date_buffer+6
    ld      r3,#3
    loop [r3] {
@@ -2747,38 +2599,20 @@ date_enter::
       ld      r2,(rr10)
       dtmf2bcd r1,r1
       dtmf2bcd r2,r2
-      bcd2byte r2,r1,r0
+      nibble2byte r2,r1,r0
       ld      (rr4),r0
-      incw    rr4
+      decw    rr4
    }
    call    rtc_write
-   popu    r3
-   popu    r2
-   popu    r1
-   popu    r0
+   popuw   rr2
+   popuw   rr0
    ret
 
 
 remote_enter::
-   pushu   r0
-   pushu   r1
-   pushu   r2
-   pushu   r3
-   ldw     rr6,#remcode_buffer
-   ldw     rr4,(remote_buffer)
-   ld      r1,#16
-   loop [r1] 
-   {
-      if [[r1 != #16] && [r1 != #8] && [r1 != #9] && [r1 != #1]]
-      {
-         ld      r2,#0
-         ifbitw  rr4,#1000000000000000b
-            ld      r2,#1
-         }
-         ld      (rr6)+,r2
-      }
-      rlcw    rr4
-   }
+   call    remote
+   pushuw  rr0
+   pushuw  rr2
    ldw     rr6,#line2
    ldw     rr10,#remcode_buffer
    ld      r8,#2
@@ -2817,21 +2651,14 @@ remote_enter::
       }
    }
    ldw     (remote_buffer),rr4
-   ldw     rr2,#i2c_buffer
-   ldw     rr4,#remote_buffer
-   lddd    (rr2)+,(rr4)+
-   lddd    (rr2)+,(rr4)+
-   I2C WRITE,E2_SLAVE,#E2_REMOTE,#2
-   popu    r3
-   popu    r2
-   popu    r1
-   popu    r0
+   popuw   rr2
+   popuw   rr0
+   call    remote_save
    ret
 
 
 setup_view::
-   pushu   r0
-   pushu   r1
+   pushuw  rr0
    pushu   r2
    ld      r4,#SETUP_BK
    add     r4,r2
@@ -2845,13 +2672,19 @@ setup_view::
                ldw     rr10,#tempinput
                ldw     rr6,#line2+3
                ld      r3,(r4)
+
+;               byte2nibble r3,r2,r1
                byte2bcd r3,r2,r1
+
                ld      (rr10)+,r2
                ld      (rr10),r1
                bcd2ascii r2,r2
                bcd2ascii r1,r1
                ld      (rr6)+,r2
                ld      (rr6),r1
+
+
+
       case #3:
       case #4:
                print   #line2, #sub_turns_2
@@ -2885,14 +2718,12 @@ setup_view::
    }
    ei
    popu    r2
-   popu    r1
-   popu    r0
+   popuw   rr0
    ret
 
 
 setup_enter::
-   pushu   r0
-   pushu   r1
+   pushuw  rr0
    pushu   r2
    ld      r4,#SETUP_BK
    add     r4,r2
@@ -2904,6 +2735,7 @@ setup_enter::
                ldw     rr10,#tempinput
                ldw     rr6,#line2+3
                ld      r3,(r4)
+;               byte2nibble r3,r2,r1
                byte2bcd r3,r2,r1
                ld      (rr10)+,r2
                ld      (rr10),r1
@@ -2924,6 +2756,7 @@ setup_enter::
                ld      r1,(rr10)
                dtmf2bcd r1,r1
                dtmf2bcd r2,r2
+;               nibble2byte r2,r1,r3
                bcd2byte r2,r1,r3
                ld      (r4),r3
       case #3:
@@ -2983,8 +2816,7 @@ setup_enter::
    }
    call    save_setup
    popu    r2
-   popu    r1
-   popu    r0
+   popuw   rr0
    ret
 
 
@@ -3010,9 +2842,8 @@ event_set::
 
 
 event_show::
-   pushu   r0
-   pushu   r1
-   pushu   r2
+   pushuw  rr0
+   pushuw  rr2
    pushu   r6
    I2C  READ,E2_SLAVE,rr8,#3
    di
@@ -3020,7 +2851,7 @@ event_show::
    ldw     rr4,#line1+11
    ld      r1,EVENTS
    sub     r1,r0
-   byte2dec r1,r3,r2
+   byte2bcd r1,r3,r2
    bcd2ascii r2,r2
    bcd2ascii r3,r3
    if [r3 == #48]
@@ -3040,7 +2871,7 @@ event_show::
    {
       ld    r0,(rr4)
       incw  rr4
-      byte2bcd r0,r2,r1
+      byte2nibble r0,r2,r1
       bcd2ascii r1,r1
       bcd2ascii r2,r2
       ld    -(rr6),r1
@@ -3051,14 +2882,12 @@ event_show::
       }
    }
    popu    r6
-   popu    r2
-   popu    r1
-   popu    r0
+   popuw   rr2
+   popuw   rr0
    ret
 
 event_view::
-   pushu   r0
-   pushu   r1
+   pushuw  rr0
    pushu   r2
    .menu #3
       .display #3, menu_preced1,      menu_preced2
@@ -3082,7 +2911,7 @@ event_view::
                    {
                       ld    r0,(rr4)
                       incw  rr4
-                      byte2bcd r0,r2,r1
+                      byte2nibble r0,r2,r1
                       bcd2ascii r1,r1
                       bcd2ascii r2,r2
                       ld    -(rr6),r1
@@ -3122,7 +2951,7 @@ event_view::
                    {
                       ld    r0,(rr4)
                       incw  rr4
-                      byte2bcd r0,r2,r1
+                      byte2nibble r0,r2,r1
                       bcd2ascii r1,r1
                       bcd2ascii r2,r2
                       ld    -(rr6),r1
@@ -3147,7 +2976,7 @@ event_view::
                    {
                       ld    r0,(rr4)
                       incw  rr4
-                      byte2bcd r0,r2,r1
+                      byte2nibble r0,r2,r1
                       bcd2ascii r1,r1
                       bcd2ascii r2,r2
                       ld    -(rr6),r1
@@ -3171,8 +3000,7 @@ event_view::
       popu   r2
    .endmenu
    popu    r2
-   popu    r1
-   popu    r0
+   popuw   rr0
    ret
 
 event_erase::
@@ -3195,6 +3023,10 @@ event_erase::
    ret
 
 event_begin::
+   if [RTCFLAG == #0]
+   {
+      ret
+   }
    pushu   r0
    call    rtc_read
    ldw     rr6,#i2c_buffer
@@ -3219,6 +3051,31 @@ event_begin::
    ret
 
 event_number::
+   if [RTCFLAG == #0]
+   {
+      ret
+   }
+   pushu   r0
+   call    rtc_read
+   ldw     rr6,#i2c_buffer
+   ld      (rr6),r0
+   incw    rr6
+   ldw     rr2,#rtc_buffer
+   lddd    (rr6)+,(rr2)+
+   lddd    (rr6)+,(rr2)+
+   lddd    (rr6)+,(rr2)+
+   ld      r0,#0
+   call    event_set
+   addw    rr8,#8
+   I2C WRITE,E2_SLAVE,rr8,#4
+   popu    r0
+   ret
+
+event_replay::
+   if [RTCFLAG == #0]
+   {
+      ret
+   }
    pushu   r0
    call    rtc_read
    ldw     rr6,#i2c_buffer
@@ -3236,6 +3093,10 @@ event_number::
    ret
 
 event_end::
+   if [RTCFLAG == #0]
+   {
+      ret
+   }
    pushu   r0
    call    rtc_read
    ldw     rr6,#i2c_buffer
@@ -3455,7 +3316,7 @@ _print::
 ;**************************************************************************
 
 ;                        .org    ROMDATA
-id::                    .ascii  "FW 0.9B Tuccia (C) 1997"
+id::                    .ascii  "FW 0.93B Tuccia (C) 1997"
 
 ;****************************************
 ;**************** Messaggi per il display
@@ -3463,29 +3324,31 @@ id::                    .ascii  "FW 0.9B Tuccia (C) 1997"
 
 message_open::          .ascii  "    PT117/96    "
 message_name::          .ascii  "Nova Elettra srl"
-message_diagok::        .ascii  "Hard Ok  Soft Ok"
-message_diagfail::      .ascii  "MALFUNZIONAMENTO"
+msg_diagok::            .ascii  "Hard Ok  Soft Ok"
+msg_diagfail::          .ascii  "Rilevato guasto:"
 message_ok::            .ascii  "   INOLTRATO    "
 message_ready::         .ascii  "Telesoccorso DGE"
 message_time::          .ascii  "    ##:##:##    "
 message_alarm::         .ascii  "Allarme in corso"
-message_alrem::         .ascii  "da telecomando  "
+message_alrem::         .ascii  "dal telecomando!"
 message_alring::        .ascii  "chiamata entran."
-message_altrig::        .ascii  "da pulsante     "
+message_altrig::        .ascii  "  dal pulsante  "
 message_alout::         .ascii  "numero non comp."
 message_break::         .ascii  "   ANNULLATO    "
 message_attendere::     .ascii  "attendere prego."
 
-message_diag::          .ascii  "  AUTODIAGNOSI  "
-msg_romfail::           .ascii  "Checksum ROM: NO"
+msg_diag::              .ascii  "  AUTODIAGNOSI  "
+msg_allok::             .ascii  "Hard:Ok  Soft:Ok"
+msg_romfail::           .ascii  "Checksum errato!"
 msg_romok::             .ascii  "Checksum ROM: Ok"
-msg_e2fail::            .ascii  "Checksum E2:  NO"
+msg_e2fail::            .ascii  "E2 non risponde!"
 msg_e2ok::              .ascii  "Checksum E2:  Ok"
-msg_rtcfail::           .ascii  "Checksum RTC: NO"
+msg_empty1::            .ascii  "Prima accensione"
+msg_empty2::            .ascii  "caricato default"
+msg_rtcfail::           .ascii  "RTC non rilevato"
 msg_rtcok::             .ascii  "Checksum RTC: Ok"
-msg_rtcno1::            .ascii  "Registro eventi "
-msg_rtcno2::            .ascii  " non presente.  "
-msg_8880fail::          .ascii  "MT8880 Regs:  NO"
+msg_rtcno::             .ascii  "(no reg. eventi)"
+msg_8880fail::          .ascii  "Registri MT8880!"
 msg_8880ok::            .ascii  "MT8880 Regs:  Ok"
 
 message_call::          .ascii  "Composizione del"
