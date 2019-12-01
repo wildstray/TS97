@@ -29,7 +29,7 @@
                         .list           me      
                         .page
 
-                        EMU      =      1
+;                        EMU      =      1
 
 ;**************************************************************************
 ;**************************** Include section *****************************
@@ -710,7 +710,8 @@ retry::
    call    event_call                          ; registro il numero chiamato
    ld      LASTNUM,r0                          ; solo alla prima ripetizione
 
-   call    number_show                         ; segnalo cosa sto' facendo
+   print   #message_call                       ; segnalo cosa sto' facendo
+   call    number_show                         
 
    sleep   #1000                               ; attendo 1 sec.
 
@@ -813,11 +814,11 @@ incoming::
       {                                       ; di un nuovo tono
          break
       }
-  ;    call    _tone_sample                    ; fino alla rilevazione
-  ;    if [r0 == #TONEBUSY]                    ; del tono di occupato
-  ;    {
-  ;       break
-  ;    }
+;      call    _tone_sample                    ; fino alla rilevazione
+;      if [r0 == #TONEBUSY]                    ; del tono di occupato
+;      {
+;         break
+;      }
       ifbit SWITCH, #RESET                    ; o al reset manuale
          jx       annullamento
       }
@@ -850,6 +851,7 @@ outgoing::
    relay1  off                                 ; mi metto in parallelo
    relay2  on                                  ; al telefono utente 
    MC118   on                                  ; wakeup del MC34118
+;   MC119   on                                  ; wakeup del MC34119
    ld      r0,#11000000b                       ; MT8880 pronto a 
    call    _8880_ctrl_wr                       ; ricevere i DTMF
    ld      DIGIT,#0
@@ -1311,21 +1313,35 @@ _WD_int::
 ;      }
    }
    ;***********************
-   if [TONE_S < #MAXTONE]                  ; poll line-tone input to
-   {                                       ; calculate a silence/tone ratio
-      ld      r0,#200                    
-      loop [r0] {
-         ld      r1,P2DR
-         and     r1,#DTMFCP
-         if [r1 == #DTMFCP]
-         {
-            inc     TONE_C
-            break
-         }
-         nop
-         nop
+;   if [TONE_S < #MAXTONE]                  ; poll line-tone input to
+;   {                                       ; calculate a silence/tone ratio
+;      ld      r0,#200                    
+;      loop [r0] {
+;         ld      r1,P2DR
+;         and     r1,#DTMFCP
+;         if [r1 == #DTMFCP]
+;         {
+;            inc     TONE_C
+;            break
+;         }
+;         nop
+;         nop
+;      }
+;      inc     TONE_S
+;   }
+   ld      r0,#200                          ; poll line-tone input
+   loop [r0] {
+      ld      r1,P2DR
+      and     r1,#DTMFCP
+      if [r1 == #DTMFCP]
+      {
+         ld      TONE_S,#1
+         break
+      } else {
+         ld      TONE_S,#0
       }
-      inc     TONE_S
+      nop
+      nop
    }
    ;***********************
    popw    RPP                              ; Restore context
@@ -1895,39 +1911,73 @@ _1420_stop::
 ;****************************************
 ;** Riconoscimento toni PBX/DIAL/BUSY/HIZ
 ;****************************************
-
 _tone_sample::
+   pushu   r1
+   pushuw  rr2
+   pushuw  rr4
    spp     #0
    _8880_di
 
    ld      r0,#11100000b
    call    _8880_ctrl_wr
 
-   ld      TONE_C,#0
-   ld      TONE_S,#0
-   sleep   #200
-   while [TONE_S < #MAXTONE]
+   ldw     rr2,#0
+   ldw     rr4,#0
+   ld      r1,#36
+   loop [r1]
    {
-      nop
+      if [TONE_S == #1]
+      {
+         inc     r2
+      } else {
+         inc     r3
+      }
+      sleep   #50
    }
-   ld      r1,TONE_C
-   if [[TONE_C > #11] && [TONE_C < #15]]     ; 11-15 
-   {
-      ld       r0,#TONEDIAL
-   }
-   if [[TONE_C > #17] && [TONE_C < #22]]     ; 17-22
+xxx::
+   if [[r2 > #0x11] && [r2 < #0x15] && [r3 > #0xF] && [r3 < #0x13]]
+;   if [[r2 > #0x11] && [r2 < #0x15]]
+;   if [[r2 == #3] && [r3 == #3]]
    {
       ld       r0,#TONEBUSY
    }
-   if [TONE_C > #26]                         ; 26+
-   {
-      ld       r0,#TONEPBX
-   }
-   if [TONE_C < #6]
-   {
-      ld       r0,#TONEHIZ
-   }
-	ret
+   popuw   rr4
+   popuw   rr2
+   popu    r1
+   ret
+
+;_tone_sample::
+;   spp     #0
+;   _8880_di
+;
+;   ld      r0,#11100000b
+;   call    _8880_ctrl_wr
+;
+;   ld      TONE_C,#0
+;   ld      TONE_S,#0
+;   sleep   #200
+;   while [TONE_S < #MAXTONE] ;36
+;   {
+;      nop
+;   }
+;   ld      r1,TONE_C
+;   if [[TONE_C > #11] && [TONE_C < #15]]     ; 11-15 
+;   {
+;      ld       r0,#TONEDIAL
+;   }
+;   if [[TONE_C > #17] && [TONE_C < #22]]     ; 17-22
+;   {
+;      ld       r0,#TONEBUSY
+;   }
+;   if [TONE_C > #26]                         ; 26+
+;   {
+;      ld       r0,#TONEPBX
+;   }
+;   if [TONE_C < #6]                          ; spurious
+;   {
+;      ld       r0,#TONEHIZ
+;   }
+;   ret
 
 ;**************************************************************************
 ;***************************** Telecomando ********************************
@@ -3601,7 +3651,7 @@ sub_T1_1:               .ascii  "Tempo massimo   "
 sub_T1_2:               .ascii  "per chiamata: ##"
 
 sub_T2_1:               .ascii  "Tempo massimo   "
-sub_T2_2:               .ascii  "per reset:    ##"
+sub_T2_2:               .ascii  "per conferma: ##"
 
 sub_C0_1:               .ascii  "Ripetizione dei "
 sub_C0_2:               .ascii  "numeri:        #"
