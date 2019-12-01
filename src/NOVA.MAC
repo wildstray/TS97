@@ -16,6 +16,8 @@
 ;* enable_TX_int                        ;
 ;* disable_TX_int                       ;
 ;* delay                us              ; ritardo di xxxxx us (fino 65535)
+;* sleep                ms              ; ritardo di xxxxx ms (fino 65535)
+;* print                where,msg       ; visualizza il messaggio msg
 ;*************************************************************************
 
 ;************************             
@@ -113,6 +115,35 @@
 	loopw [rr0] {
 	   nop
 	}
+	popuw   rr0
+.endm
+;************************
+.macro  sleep   ms
+	pushuw  rr0
+   pushuw  rr2
+   ldw     rr0,ms
+   loopw [rr0] {
+      ldw   rr2,#430
+      loopw [rr2] {
+         nop
+      }
+   }
+   popuw   rr2
+	popuw   rr0
+.endm
+;************************
+.macro  print  where,message
+	pushuw  rr0
+   pushuw  rr2
+   pushuw  rr4
+   ld      r4,#16
+   ldw     rr0,#where
+   ldw     rr2,#message
+   loop [r4] {
+      lddp (rr0)+,(rr2)+
+   } 
+   popuw   rr4
+   popuw   rr2
 	popuw   rr0
 .endm
 ;************************
