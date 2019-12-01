@@ -16,7 +16,8 @@
 ;* relay2               on/off          ; eccita/diseccita il relay 2
 ;* led1                 on/off          ; accende/spegne il led 1
 ;* led2                 on/off          ; accende/spegne il led 2
-;* backled              on/off          ; accende/spegne il backlight
+;* backlight            on/off          ; accende/spegne il backlight
+;* mute                 on/off          ; attiva/disattiva il muting
 ;* spi_di                               ; disable SPI interrupt
 ;* spi_ei                               ; enable SPI interrupt
 ;* remote_di                            ; disable REMOTE interrupt
@@ -118,14 +119,14 @@
 .endm
 ;************************
 .macro   remote_di       
-   and   EIPR,#~ipb1m
-   and   EIMR,#~ib1m 
+   and   EIPR,#~ipd1m
+   and   EIMR,#~id1m 
 .endm
 ;************************
 .macro   remote_ei
-   and   EIPR,#~ipb1m  
+   and   EIPR,#~ipd1m  
 	nop
-   or    EIMR,#ib1m    
+   or    EIMR,#id1m    
 .endm
 ;************************
 .macro   _8880_di       
@@ -140,63 +141,57 @@
 .endm
 ;************************
 .macro   relay1 status
-   pushu r0
-   ld    r0,#status
-   if [r0 == off]
-   {
+   .ifc eq status
       and     P5DR,#~REL1
-   } else {
+   .endc
+   .ifc ne status
       or      P5DR,#REL1
-   }
-   popu  r0
+   .endc
 .endm
 ;************************
 .macro   relay2 status
-   pushu r0
-   ld    r0,#status
-   if [r0 == off]
-   {
+   .ifc eq status
       and     P5DR,#~REL2
-   } else {
+   .endc
+   .ifc ne status
       or      P5DR,#REL2
-   }
-   popu  r0
+   .endc
 .endm
 ;************************
 .macro   led1 status
-   pushu r0
-   ld    r0,#status
-   if [r0 == off]
-   {
+   .ifc eq status
       and     P2DR,#~LED1
-   } else {
+   .endc
+   .ifc ne status
       or      P2DR,#LED1
-   }
-   popu  r0
+   .endc
 .endm
 ;************************
 .macro   led2 status
-   pushu r0
-   ld    r0,#status
-   if [r0 == off]
-   {
+   .ifc eq status
       and     P2DR,#~LED2
-   } else {
+   .endc
+   .ifc ne status
       or      P2DR,#LED2
-   }
-   popu  r0
+   .endc
 .endm
 ;************************
-.macro   backled status
-   pushu r0
-   ld    r0,#status
-   if [r0 == off]
-   {
+.macro   backlight status
+   .ifc eq status
       and     P2DR,#~BACKLIGHT
-   } else {
+   .endc
+   .ifc ne status
       or      P2DR,#BACKLIGHT
-   }
-   popu  r0
+   .endc
+.endm
+;************************
+.macro   mute status
+   .ifc eq status
+      and     P5DR,#~MUTE
+   .endc
+   .ifc ne status
+      or      P5DR,#MUTE
+   .endc
 .endm
 ;************************
 .macro byte2bcd byte,bcd10,bcd1
