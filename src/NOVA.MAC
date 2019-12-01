@@ -207,9 +207,9 @@
    popu    r0
 .endm
 ;************************
-.macro i2c opr,slave,addr,lenght
+.macro i2c op,slave,addr,lenght
    pushuw rr0
-   ld    I2C_OP,#opr
+   ld    SLAVE_OP,#op
    ld    SLAVE_W,#slave
    ldw   rr0,addr
    ld    LENGHT,lenght
@@ -219,7 +219,7 @@
 ;      rol   r0
 ;      or    SLAVE_W,r0
 ;   }
-   ld    I2C_ADDR,r1
+   ld    SLAVE_ADDR,r1
    call  i2c_bus
    popuw   rr0
 .endm
