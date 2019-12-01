@@ -1,0 +1,267 @@
+.title          "e2prom manager"
+.list bex
+
+.global         IT_END_TRANS, TEMPO, EEP_MAN
+.extern         RESET_START
+
+.include        "c:\st9\include\bitmacro.inc"
+
+.macro  DELAY   ?loop_var                       ; a loop is 1.5 fS
+        ld      COUNTER,#03h                    ; 10 Tcy
+loop_var:
+        dec     COUNTER                         ; 6 Tcy
+        jrnz    loop_var                        ; 12 Tcy
+.endm
+
+
+.macro  DIS_SPI_IT                              ; disable SPI interrupt
+        and     EIPR,#~ipb0m                    ; reset the B0 pending
+        and     EIMR,#~ib0m                     ; mask the B0 channel
+.endm
+
+
+.macro  EN_SPI_INT                              ; enable SPI interrupt
+        and     EIPR,#~ipb0m                    ; reset the B0 pending
+        nop
+        or      EIMR,#ib0m                      ; unmask the B0 channel
+.endm
+
+
+.macro  INIT_TRANS_READ                         ; init SPI
+        ld      STAT_TRANS_SPI,#TRANS_RD_DATA   ; init read operation
+        spp     #0
+        ld      SPI_TAMP,#0ffh                  ; to read data from e2prom
+.endm
+
+
+;************************************************
+;*****  Register declarations  ******************
+;*****                         ****************** 
+
+EEP_ADD         = R0                            ; address in e2prom
+WRITE_DATA      = R1                            ; data to be programmed
+write_data      = r1                            ;
+READ_DATA       = R2                            ; data which is read
+read_data       = r2                            ;
+EEP_FUNCT       = R3                            ;
+STAT_EEP        = R4                            ;
+STAT_TRANS_SPI  = R5                            ;
+NB_BYTE         = R6                            ; nr. of byte
+nb_byte         = r6                            ;
+SPI_TAMP        = R7                            ;
+MEMO_NB_BYTE    = R14                           ;
+COUNTER         = R15                           ;
+DATA_ENABLE     = 31                            ;
+
+
+;************************************************
+;*****  Costant declarations  *******************
+;*****                        ******************* 
+
+ADD_EEP_W      == 0A0h                          ; address of write slave
+ADD_EEP_R      == 0A1h                          ; address of read slave
+
+SDI_MASK        = 02h                           ; SDI = port 2.1
+SDO_MASK        = 04h                           ; SDI = port 2.2
+SCK_MASK        = 08h                           ; SDI = port 2.3
+
+READ_FUNCT     == 1                             ; read mode
+WRITE_FUNCT    == 2                             ; write mode
+VERIF_FUNCT    == 3                             ; alternate read mode
+
+T_ADD_SLAVE    == 1                             ;
+T_ADD_EEP      == 2                             ; 
+TRANS_WR_DATA  == 3                             ;
+TRANS_RD_DATA  == 4                             ;
+
+EEP_OK         == 0                             ; e2prom is OK 
+LECT_ON        == 1                             ; e2prom is reading a byte
+VERIF_ON       == 2                             ; e2prom is reading current 
+ECR_ON         == 3                             ; e2prom is programming
+NO_ACK         == 4                             ; e2prom in not acknoledged
+
+EEP_FREE_MASK  == 080h                          ; e2prom is ready
+
+
+.text
+
+proc    EEP_MAN [PPR] {
+        spp     #0
+        DIS_SPI_IT
+        ld      MEMO_NB_BYTE,NB_BYTE            ; save NB_BYTE before dec
+        switch  [EEP_FUNCT] {
+           case #READ_FUNCT:
+                call READ_EEP
+           case #VERIF_FUNCT:
+                call VERIF_EEP
+           case #WRITE_FUNCT:
+                call WRITE_EEP
+        }
+
+}
+
+proc    READ_EEP [PPR] {                        
+        ifbit STAT_EEP,#EEP_FREE_MASK
+        {
+           call      INIT_START_I2C
+           ld        STAT_TRANS_SPI,#T_ADD_SLAVE  
+           ld        STAT_EEP,#LECT_ON
+           ld        SPIDR,#ADD_EEP_W
+        }
+}
+
+proc    VERIF_EEP [PPR] {                        
+        ifbit STAT_EEP,#EEP_FREE_MASK
+        {
+           call      INIT_START_I2C
+           ld        STAT_TRANS_SPI,#T_ADD_SLAVE  
+           ld        STAT_EEP,#VERIF_ON
+           ld        SPIDR,#ADD_EEP_R
+        }
+}
+
+proc    WRITE_EEP [PPR] {                        
+        ifbit STAT_EEP,#EEP_FREE_MASK
+        {
+           call      INIT_START_I2C
+           ld        STAT_TRANS_SPI,#T_ADD_SLAVE  
+           ld        STAT_EEP,#ECR_ON
+           ld        SPIDR,#ADD_EEP_W
+        }
+}
+
+proc    INIT_START_I2C [PPR] {                        
+        spp     #0
+        ld      SPICR,#42h
+
+        and     P2DR,#~SDO_MASK
+        spp     #P2C_PG
+        and     P2C0R,#~SDO_MASK
+        DELAY
+        spp     #0
+        or      SPICR,#spen
+        EN_SPI_IT
+        spp     #P2C_PG
+        or      P2C0R,#SDO_MASK
+}
+
+proc    GEN_STOP [PPR] {
+        spp     #0
+        DIS_SPI_INT
+        and     P2DR,#~SDO_MASK
+        spp     #P2C_PG
+        and     P2C0R,#~SDO_MASK
+        spp     #0
+        and     SPICR,#~spen
+        DELAY
+        spp     #P2C_PG
+        or      P2C0R,#SDO_MASK
+}
+
+proc    GEN_ACK [PPR] {
+        and     P2DR,#~SDO_MASK
+        spp     #P2C_PG
+        and     P2C0R,#~SDO_MASK
+        spp     #0
+        and     SPICR,#~spen
+        DELAY
+        spp     #P2C_PG
+        or      P2C0R,#SDO_MASK
+}
+
+proc    TEST_ACK [PPR] {
+        and     SPICR,#~spen
+        attbit  P2DR,#SCK_MASK
+        ifbit   P2DR,#SDI_MASK
+        {
+           ld      STAT_EEP,#NO_ACK
+        } else {
+           DELAY
+        }
+        or       SPICR,#spen
+}
+
+
+IT_END_TRANS::
+        pushu   PPR    
+        pushuw  RPP
+        srp     #0
+        spp     #0
+        if [STAT_TRANS_SPI == #TRANS_RD_DATA] {
+           ld      read_data,SPIDR
+           ld      DATA_TABLE(nb_byte),read_data
+           dec     nb_byte
+           if [SETZ] {
+              call    GEN_STOP
+              ld      STAT_EEP,#EEP_FREE_MASK  
+           } else {
+              call    GEN_ACK
+              INIT_TRANS_READ
+           }
+        } else {
+           call    TEST_ACK
+           if [STAT_EEP == #NO_ACK] {
+              call    GEN_STOP
+              or      STAT_EEP,#EEP_FREE_MASK  
+              switch [STAT_TRANS_SPI] {
+                 case #T_ADD_SLAVE:
+                    if [STAT_EEP == #VERIF_ON] {
+                    } else {
+                       ld      STAT_TRANS_SPI,#T_ADD_EEP
+                       spp     #0
+                       ld      SPI_TAMP,EEP_ADD
+                    }
+                 case #T_ADD_EEP:
+                    if [EEP_FUNCT == #READ_FUNCT] {
+                       call    INIT_START_I2C   
+                       ld      STAT_TRANS_SPI,#T_ADD_SLAVE   
+                       ld      SPI_TAMP,#ADD_EEP_R
+                       ld      STAT_EEP,#VERIF_ON
+                    } else {
+                       spp     #0
+                       ld      STAT_TRANS_SPI,#TRANS_WR_DATA
+                       ld      write_data,DATA_TABLE(nb_byte)
+                       ld      SPI_TAMP,write_data
+                    }
+                 case #TRANS_WR_DATA:
+                    spp     #0
+                    dec     nb_byte
+                    if [CLZ] {
+                       ld      write_data,DATA_TABLE(nb_byte)
+                       ld      SPI_TAMP,write_data
+                    } else {
+                       call    PROG_DELAY
+                       call    GEN_STOP
+                    }
+              }
+           }
+        }                     
+        popuw   RPP
+        ld      SPIDR,SPI_TAMP
+        popu    PPR
+        iret
+
+
+proc    PROG_DELAY [PPR] {
+        pushuw  RPP
+        spp     #WDT_PG
+        srp     #(15*2)
+        ld      wcr,#wden
+        clr     wdtpr
+        ldw     wdtr,#15015                     ; 15015 * 333ns = 5ms
+        while   [CLZ] {
+           addw    wdtr,#15015
+           dec     MEMO_NB_BYTE
+        }
+        or      wdtcr,#(stsp | sc)
+        pushuw  RPP
+}
+
+TEMPO::
+        pushu   PPR
+        spp     #0
+        and     EIPR,#~ipa0m
+        or      STAT_EEP,#EEP_FREE_MASK
+        popu    PPR
+        iret
+
