@@ -17,13 +17,17 @@
 
 ;************************
 .macro  blank  where
+   pushuw  rr6
+   pushuw  rr8
    ldw     rr6,#where
-   ld      r3,#16
-   ld      r8,#32
-   loop [r3]
+   ld      r8,#16
+   ld      r9,#32
+   loop [r8]
    {
-      ld      (rr6)+,r8
+      ld      (rr6)+,r9
    }
+   popuw   rr8
+   popuw   rr6
 .endm
 ;************************
 ;.macro  print  where,msg1,msg2

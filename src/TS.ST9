@@ -113,7 +113,7 @@ E2_REMOTE       = 32
 E2_NUMERS       = 64
 E2_EVENTS       = 128
 E2_SIZE         = 2048
-E2_PGSIZE       = 256
+E2_PGSIZE       = 16
 
 ;EVENT RELATED DECLARATION
 MAXEVENT        = 30
@@ -437,7 +437,7 @@ st9$entry_GO::                                  ;
    ld      p7c2r,#00100001b                ;\
    ld      p7c1r,#11011110b                ; | Set port 7
    ld      p7c0r,#00100011b                ;/
-   ld      P7DR ,#00111111b                ;
+   ld      P7DR ,#11111111b                ;
    P1D  =  P7DR
    .endc
    .ifc ndf EMU
@@ -445,7 +445,7 @@ st9$entry_GO::                                  ;
    ld      p1c2r,#00001000b                ;\
    ld      p1c1r,#00110111b                ; | Set port 1
    ld      p1c0r,#00001000b                ;/
-   ld      P1DR ,#00001111b                ;
+   ld      P1DR ,#00111111b                ;
    P1D  =  P1DR     
    .endc
    ;***********************
@@ -536,7 +536,22 @@ init::
 
    clr     EIPR
 
+   WD_stop
    ei
+
+   ld      (i2c_buffer+0),#0x10
+   ld      (i2c_buffer+1),#0x20
+   ld      (i2c_buffer+2),#0x30
+   ld      (i2c_buffer+3),#0x40
+   ld      (i2c_buffer+4),#0x50
+   ld      (i2c_buffer+5),#0x60
+tag1::
+   I2C WRITE,E2_SLAVE,#0x8D,#6
+tag2::
+   I2C READ,E2_SLAVE,#0x8D,#6
+tag3::
+   nop
+   nop
 
 diagnose::
    print   #line1, #msg_diag
@@ -595,7 +610,7 @@ idle::
    call    load_setup
 
    ldw     rr0,#frame_buffer            ; loads the frame buffer
-   ldw     (rr0),#0                     ; zero the buffer
+   ldw     (rr0),#0                     ; zeros the buffer
    ld      ALARM,#0
    ld      HOOK,#0
    ld      SWITCH,#0
@@ -714,7 +729,6 @@ retry::
    }
    dec     r13                                 ; decremento una ripetizione
    relay1  on                                  ; prendo la linea telefonica
-   sleep   #1000                               ; attendo 1 sec.
 
    call    event_call                          ; registro il numero chiamato
    ld      LASTNUM,r0                          ; solo alla prima ripetizione
@@ -737,6 +751,8 @@ retry::
       }
    }
    ei
+
+   sleep   #1000                               ; attendo 1 sec.
 
    call    combtel                             ; compongo il numero corrente
 
@@ -1348,7 +1364,7 @@ _SPI_int::
          call  GEN_ACK 
          ld    SPI_STAT,#TRANS_DRD
          spp   #0
-         ld    temp,#0FFH 
+         ld    temp,#0xFF
       } 
 	} else {
       call  TEST_ACK          
@@ -1363,7 +1379,7 @@ _SPI_int::
             {
                ld    SPI_STAT,#TRANS_DRD
                spp   #0
-               ld    temp,#0FFH 
+               ld    temp,#0xFF
 				} else {
                ld    SPI_STAT,#TRANS_ADDR
 					spp	#0
@@ -1494,10 +1510,10 @@ display_bufclr::
 	ret
 
 display_update:
-	pushuw  rr0
-	pushuw  rr2
-	pushuw  rr8
-	pushuw  rr10
+   pushuw  rr0
+   pushuw  rr2
+   pushuw  rr8
+   pushuw  rr10
 	;***********************
 	call    _display_ready
    ld      P0D,#01001111b                    ; scrittura istruzioni
@@ -1525,10 +1541,10 @@ display_update:
 		ld      r0,(rr8)+
 		call    _display_write
 	}
-	popuw   rr10
-	popuw   rr8
-	popuw   rr2
-	popuw   rr0
+   popuw   rr10
+   popuw   rr8
+   popuw   rr2
+   popuw   rr0
 	;*********************** 
 	ret
 
@@ -1987,7 +2003,6 @@ _i2c_transfer::
             ld       SPIDR,SLAVE_W         ; write mode address
       }
    }
-
    waitbit SLAVE_STAT,#SLAVE_READY
    delay   #2300
    popu    PPR                             ; critical section end
@@ -2163,7 +2178,6 @@ e2_check::
 
 
 rtc_check::
-;   zero    i2c_buffer,#8
    I2C READ,RTC_SLAVE,#0,#8
    ifbit SLAVE_STAT, #NO_ACK
      ld       RTCFLAG,#0
@@ -2172,7 +2186,6 @@ rtc_check::
    }
    if [(i2c_buffer+7) == #0x1E]
    {
-;      zero i2c_buffer,#8
       ld   (i2c_buffer+0),#0x0
       ld   (i2c_buffer+1),#0x0
       ld   (i2c_buffer+2),#0x12
@@ -2195,7 +2208,6 @@ rtc_check::
 ;**************************************************************************
 
 defaults::
-;   zero    i2c_buffer,#16
    ldw     rr2,#0
    ld      r8,#(E2_SIZE / 16)
    loop [r8]
@@ -2381,7 +2393,6 @@ rtc_read::
    ldw     rr0,#i2c_buffer
    ldw     rr2,#rtc_buffer
    ld      r4,#8
-   ld      r4,#10
    loop [r4] {
       lddd    (rr2)+,(rr0)+
    }
@@ -2421,7 +2432,6 @@ number_read::
    pushuw  rr4
    pushuw  rr12
    zero    number,#16
-;   zero    i2c_buffer,#16
    ldw     rr2,#8
    mul     rr2,r0
    addw    rr2,#E2_NUMERS
@@ -2455,7 +2465,6 @@ number_read::
 number_write::
    pushu   r1
    pushu   r2
-;   zero    i2c_buffer,#8
    ldw     rr6,#0
    ldw     rr4,#0
    loop
@@ -2947,7 +2956,6 @@ event_view::
       {
          break
       }
-;      zero    i2c_buffer,#16
       I2C READ,E2_SLAVE,rr10,#10
       ld      r0,(i2c_buffer)
       if [[r0 != #EVCALL] && [r0 != #EVREPLY] && [r0 != #EVEND]]
@@ -3007,7 +3015,6 @@ event_view::
             }
             if [r2 == #1]
             {
-;               zero    i2c_buffer,#16
                I2C READ,E2_SLAVE,rr10,#10
                di
                print   #line1,#msg_evnumtime
@@ -3219,13 +3226,14 @@ event_end::
    lddd    (rr6)+,(rr2)+
    lddd    (rr6)+,(rr2)+
    ld      r0,ALSTATE
-   ld      (rr6),r0
+   ld      (rr6)+,r0
    ld      r0,#0
+   ld      (rr6),r0
    call    event_set
    ld      r0,#0
    ld      r1,EVIDX
    addw    rr8,rr0
-   I2C WRITE,E2_SLAVE,rr8,#5
+   I2C WRITE,E2_SLAVE,rr8,#6
    popuw   rr2
    popuw   rr0
    ret
@@ -3595,7 +3603,9 @@ remote_buffer::         .blkb   2               ; format: 0xxxxxx00xxxxxx0
 
 number::                .blkb   20              ; current telefonic number
 
+                        .blkb   2
 i2c_buffer::            .blkb   16              ; buffer for i2c bus
+                        .blkb   2
 
 rtc_buffer::            .blkb   8               ; rtc time/date buffer
 
