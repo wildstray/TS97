@@ -136,16 +136,17 @@ START_CODE      = 100h                  ; Start of C startup code
 
 
 ;**************
-;******* Bank 9             
+;******* Bank 9                       
 ;**************
-;       := RR158
-;       := RR156
-;       := RR154
-;       := RR152
-;       := RR150
-;       := RR148
-;       := RR146
-;       := RR144
+;        := RR158                     
+;        := RR156                     
+;        := RR154                     
+;        := RR152                     
+;        := RR150                     
+;        := RR148                     
+;        := RR146                     
+;        := RR144                     
+
 					
 		
 ;**************
@@ -232,9 +233,9 @@ START_CODE      = 100h                  ; Start of C startup code
 
 
 ;**************
-;******* Bank 3             
+;******* Bank 3                         ; Timer0 context registers
 ;**************
-;       :=RR62
+;       :=RR62                          ; Don't define!
 ;       :=RR60
 ;       :=RR58
 ;       :=RR56
@@ -246,9 +247,9 @@ START_CODE      = 100h                  ; Start of C startup code
 
 
 ;**************
-;******* Bank 2             
+;******* Bank 2                         ; WatchDog context registers
 ;**************
-;       :=RR46
+;       :=RR46                          ; Don't define!
 ;       :=RR44
 ;       :=RR42
 ;       :=RR40
@@ -260,11 +261,11 @@ START_CODE      = 100h                  ; Start of C startup code
 
 
 ;**************
-;******* Bank 1             
+;******* Bank 1                         ; Page #1 context register
 ;**************
-;       :=RR30
-;       :=RR28
-;       :=RR26
+;       :=RR30                          ; Don't define!
+;       :=RR28                           
+;       :=RR26                          
 ;       :=RR24
 ;       :=RR22
 ;       :=RR20
@@ -282,60 +283,62 @@ START_CODE      = 100h                  ; Start of C startup code
 ;**************************************************************************
 ;************************ TS INITIALIZATIONS CODE  ************************
 ;**************************************************************************
-.text                                   ; Start program segment
+   .text                                   ; Start program segment
 
 
 ;***************************************
 ;**************** Interrupt vector table
 ;***************************************
-.text
-	;***********************        
-.org    START_IT_TABLE
+
+
+   .org    START_IT_TABLE
 	.word   st9$entry                       ; Reset interrupt vector:Entry point
 	.word   _trap_div0                      ; Divide by 0 interrupt service routine
 	.word   _top_level_int                  ; Top Level interrupt service routine
 	;***********************        
-.org    SCI_VEC
-	.word   _st9_it_s_rec_err               ; SCI receiver err int service
+   .org    SCI_VEC
+   .word   _SCI_it_s_rec_err               ; SCI receiver err int service
 	.word   _SCI_9th_bit                    ; SCI 9th bit int service
-	.word   _st9_it_receive                 ; SCI RX int service
-	.word   _st9_it_transmit                ; SCI TX int service
+   .word   _SCI_it_receive                 ; SCI RX int service
+   .word   _SCI_it_transmit                ; SCI TX int service
 	;***********************        
-.org    EXT_INT_VEC                             
-	.word   _A0_soft_int                    ; Int A0 used as soft int
-	.word   _A1_soft_int                    ; Int A1 used as soft int
-	.word   _B0_soft_int                    ; Int B0 used as soft int
-	.word   _B1_soft_int                    ; Int B1 used as soft int
-	.word   _C0_soft_int                    ; Int C0 used as soft int
-	.word   _C1_soft_int                    ; Int C1 used as soft int
-	.word   _D0_soft_int                    ; Int D0 used as soft int
-	.word   _D1_soft_int                    ; Int D1 used as soft int
+   .org    EXT_INT_VEC                             
+   .word   _A0_int                         ; Interrupt A0 ( Watchdog )
+   .word   _A1_int                         ; Interrupt A1 ( 8880 IRQ )
+   .word   _B0_int                         ; Interrupt B0 ( SPI int  )
+   .word   _B1_int                         ; Interrupt B1 ( Remote   )
+   .word   _C0_int                         ; Interrupt C0 ( External )
+   .word   _C1_int                         ; Interrupt C1 ( External )
+   .word   _D0_int                         ; Interrupt D0 ( External )
+   .word   _D1_int                         ; Interrupt D1 ( External )
 	;***********************        
-.org    T0_UNDERFLOW
-	.word   _T0_RTC_int                     ; Real time clock interrupt
+   .org    T0_UNDERFLOW
+   .word   _T0_int_0                       ; Multifunction timer interrupt
+   .word   _T0_int_1                       ; Multifunction timer interrupt
+   .word   _T0_int_2                       ; Multifunction timer interrupt
+   .word   _T0_int_3                       ; Multifunction timer interrupt
 	;***********************        
-
 
 
 
 ;***************************************
 ;************ Linker options entry point
 ;***************************************
-.org    START_CODE                              ; Start code
+   .org    START_CODE                           ; Start code
 	;***********************        
 st9$entryRS::                                   ; Entry point for Separate 
-	sdm                                     ; Read Only Environment -iI
+   sdm                                          ; Read Only Environment -iI
 	;***********************        
 st9$entryR_::                                   ; Entry point for 
-	or      FLAGR,#10b                      ; Read Only Environment -I 
-	jr      st9$entry_GO                    ; Set user flag:
-						; data (ROM) to bss (RAM) copy
+   or      FLAGR,#10b                           ; Read Only Environment -I 
+   jr      st9$entry_GO                         ; Set user flag:
+                                                ; data (ROM) to bss (RAM) copy
 	;***********************        
 st9$entry_S::                                   ; Entry point for Separate
-	sdm                                     ; Address Space -i
+   sdm                                          ; Address Space -i
 	;***********************        
 st9$entry__::                                   ; Entry point for 
-	and     FLAGR,#~10b                     ; Common Address Space
+   and     FLAGR,#~10b                          ; Common Address Space
 st9$entry_GO::                                  ;
 
 
@@ -375,8 +378,8 @@ DTMFINOUT       = 00000101b
 DTMFTONE        = 00000110b
 TONEDIAL        = 1
 TONEPBX         = 2
-TONEBUSY1       = 3
-TONEBUSY2       = 4
+TONEBUSY        = 3
+TONEMISDIAL     = 4
 
 ;EXTERNAL ALARMS
 ALARM1          = 10000000b
@@ -400,7 +403,7 @@ Init_IO_port:
 	ld      p2c1r,#01101110b                ; | Set port 2
 	ld      p2c0r,#11011111b                ;/
        
-       ;emulator board  ^     ^
+  ;emulator board  ^     ^
 
 	ld      p2dr,#00000000b
 	;***********************
@@ -436,7 +439,7 @@ Init_IO_port:
 	ld      moder,#11100000b                ; Set USP,SSP in int reg - Ck/2
 	ld      usplr,#(USP_VAL+1)              ; Init User stack pointer
 	ld      ssplr,#(SSP_VAL+1)              ; Init System stack pointer
-;       ld      cicr,#10001111b                 ; Set CICR   OK
+;  ld      cicr,#10001111b                 ; Set CICR   OK
 ;////////////////////// per usare emulatore ////////////////
 	ld      cicr,#10101111b                 ; Set CICR   OK
 ;///////////////////////////////////////////////////////////
@@ -449,11 +452,11 @@ Init_IO_port:
 ;****************** page 0 configuration 
 ;***************************************
 	srp     #(15*2)                         ; Set register bank F
-	ld      eimr,#00000001b                 ; Unmask interrupts
-	ld      eitr,#00000000b                 ; Set int triggers
+   ld      eimr,#00000001b                 ; Unmask interrupts
+   ld      eitr,#10000000b                 ; Set int triggers
 	ld      eivr,#01010100b                 ; Set int_vect=5X / NMI
-	ld      eiplr,#10101000b                ; Interrups priority
-;        ld      nicr,#00000000b                ; TLI disabled   
+   ld      eiplr,#10101001b                ; Interrups priority
+;  ld      nicr,#00000000b                 ; TLI disabled   
 ;////////////////////// per usare emulatore ////////////////
 	ld      nicr,#10000000b                 ; TLI enabled
 ;///////////////////////////////////////////////////////////
@@ -471,20 +474,20 @@ Init_IO_port:
 	ld      s_brghr,#00                     ; Set baud_rate=19.200
 	ld      s_imr,#00h                      ; Set int mask register
 	ld      s_ivr,#SCI_VEC                  ; SCI interrupt vector
-						;  40h=Rx error
-						;  42h=9th bit address 
+                                           ;  40h=Rx error
+                                           ;  42h=9th bit address 
 						
-						;  44h=Rx data ready
-						;  46h=Tx data empty 
+                                           ;  44h=Rx data ready
+                                           ;  46h=Tx data empty 
 	ld      s_idpr,#00h                     ; Set interrupt priority=2
 	ld      s_chcr,#06Bh                    ; Set char conf register
-						;  8 bit data
-						;  2 bit stop
-						;  parity enabled
-						;  even parity
+                                           ;  8 bit data
+                                           ;  2 bit stop
+                                           ;  parity enabled
+                                           ;  even parity
 	ld      s_ccr,#082h                     ; Set clock conf register
-						;  16 * asynchronous mode
-						;  en loop back
+                                           ;  16 * asynchronous mode
+                                           ;  en loop back
 	and     s_isr,#03h                      ; Clr pending interrupt
 	ld      s_brglr,#39                     ; Set baud_rate=19.200 (24Mhz)
 
@@ -494,7 +497,7 @@ Init_IO_port:
 ;***************************************
 	spp     #WDT_PG                         ; Set Watch_dog timer page
 	ld      wdtpr,#29                       ; Prescaler value
-	ldw     wdtr ,#5000                     ; Number to count 
+   ldw     wdtr ,#5000                     ; Number to count 
 	ld      wdtcr,#00110000b                ; Continuous mode / Timer
 	
 
@@ -504,10 +507,10 @@ Init_IO_port:
 ;***************************************
 	spp     #SPI_PG                         ; Set SPI page
 	ld      spicr,#01000010b                ; Enable SPI
-						; Reset Busy flag
-						; set clock phase
-						; speed max
-						; output disabled
+                                           ; Reset Busy flag
+                                           ; set clock phase
+                                           ; speed max
+                                           ; output disabled
 
 
 
@@ -527,22 +530,21 @@ Init_IO_port:
 	;***********************                
 	and     S_ISR,#00000011b                ; Clear pending bit
 	ld      S_CCR,#80h                      ; Disable loop back mode
+   ld      s_idpr,#00001000b
 
 ;**************************************************************************
 ;************************** TS MAIN PROGRAM *******************************
 ;**************************************************************************
 main::
 	srp     #(15*2)                         ; Set register bank F
-       ;spp     #SCI1_PG
-       ;ld      s_idpr,#00001000b
 	spp     #WDT_PG                         ; Set Watch_dog timer page
-	or      wdtcr,#stsp                     ; Start WatchDog/Timer
+   or      wdtcr,#stsp                     ; Start WatchDog/Timer
 	
 	spp     #0                              ; Set Page 0
 	srp     #0                              ; Set register bank 0
 	call    display_init
 	call    _8880_init
-	;start_T0_timer
+  ;start_T0_timer
 	
 	ei
 	
@@ -564,16 +566,16 @@ xxx::
 
 ;jx xyz
 	set_bit P5DR,REL1       ;on hook
-	set_bit P5DR,REL2       
+   set_bit P5DR,REL2       
 	delay   #60000
 	delay   #60000
 	
 eee::        
 	
-;        or      EIMR,#(ALARM1 | ALARM2 | ALARM3 | ALARM4)
-;        clr     eipr  
+;  or      EIMR,#(ALARM1 | ALARM2 | ALARM3 | ALARM4)
+;  clr     eipr  
 	
-	jx      rem
+   jx      tony
 
 xyz:: 
 ;       attendo ring per prendere linea
@@ -596,7 +598,7 @@ xxx1::
 	}
 
 
-;        ld      r0,#DTMFTONE
+;  ld      r0,#DTMFTONE
 	ld      r0,#DTMFINOUT
 	call    _8880_ctrl_wr
 
@@ -666,10 +668,10 @@ zzz::
 		ld      r1,r0
 		and     r0,#00000010b
 	} while [r0==#0] 
-;        and    r1,#00000100b
-;        if [r1!=#0] {
-;               call    _8880_data_rd
-;        }
+;  and    r1,#00000100b
+;  if [r1!=#0] {
+;     call    _8880_data_rd
+;  }
 	jx      pino
 
        
@@ -686,15 +688,15 @@ loop {
 		ld      r1,r0
 		and     r0,#00000010b
 	} while [r0 == #0] 
-;       and    r1,#00000100b
-;       if [r1!=#0] {
-;              call    _8880_data_rd
-;       }
+;  and    r1,#00000100b
+;  if [r1!=#0] {
+;     call    _8880_data_rd
+;  }
 }
 
 pino::
 
-;        ld      r0,#DTMFTONE
+;  ld      r0,#DTMFTONE
 	ld      r0,#DTMFINOUT
 	call    _8880_ctrl_wr
 
@@ -723,42 +725,36 @@ peppo::
 	      ld   r2,r0
 	      inc  r8
 	      if [r8 > #16] {
-		 xor     r8,r8
-		 inc     r8
-		 ldw     rr6,#display_buffer
-		 addw    rr6,#16
+            xor     r8,r8
+            inc     r8
+            ldw     rr6,#display_buffer
+            addw    rr6,#16
 	      }
 	      switch [r0] {
 	      case #0:
-		 break
+            break
 	      case #10:
-		 ld      r4,#48
-		 ld      (rr6)+,r4
-		 call    reset_message
+            ld      r4,#48
+            ld      (rr6)+,r4
+            call    reset_message
 	      case #11:
-		 ld      r4,#00101010b
-		 ld      (rr6)+,r4
-		 call    rec_message
+            ld      r4,#00101010b
+            ld      (rr6)+,r4
+            call    rec_message
 	      case #12:
-		 ld      r4,#00100011b
-		 ld      (rr6)+,r4
-		 call    play_message
+            ld      r4,#00100011b
+            ld      (rr6)+,r4
+            call    play_message
 	      default:
-		 ld      r4,#48
-		 add     r4,r2
-		 ld      (rr6)+,r4
+            ld      r4,#48
+            add     r4,r2
+            ld      (rr6)+,r4
 	      }
 	   }
-
-	
 	}
 
 	call    _8880_scancp
 	switch [r0] {
-	   case #TONEBUSY1:
-		 clr_bit  P5DR,REL1
-	   case #TONEBUSY2:
-		 clr_bit  P5DR,REL1
 	   default:
 	}
 	
@@ -768,8 +764,8 @@ stop::
 
 
 rem::
-	sdm
-	call    display_bufclr
+;   call    T0_remote
+   call    display_bufclr
 	ldw     rr0,#display_buffer
 	ldw     rr2,#telecomando
 	ld      r4,#16
@@ -777,29 +773,41 @@ rem::
 	   lddd (rr0)+,(rr2)+
 	}             
 	loop {
-	   call    _remote_sample
-	   ldw     rr6,#display_buffer+16
-	   ldw     rr8,(frame)
-	   ld      r1,#16
-	   loop [r1] 
-	   {
-	      ld      r2,#48
-	      ifbitw  rr8,#1000000000000000b
-		 ld      r2,#49
-	      }
-	      rlcw    rr8
-	      
-	      ld      (rr6)+,r2
-	   }
-	   delay #60000
-	   delay #60000
-	   delay #60000
-	   delay #60000
-	   delay #60000
-	   waitnobit P2DR,#REMOTE
-	   ifbit P2DR,#REMOTE
-	      delay #9000
-	   }
+      waitbit P2DR,#REMOTE
+      call    _frame_sample
+      ldw     rr6,#display_buffer+16
+      ldw     rr8,(frame_buffer)
+      ld      r1,#16
+      loop [r1] 
+      {
+         ld      r2,#48
+         ifbitw  rr8,#1000000000000000b
+            ld      r2,#49
+         }
+         rlcw    rr8
+         ld      (rr6)+,r2
+      }
+	}
+
+
+tony::
+   ld      r0,#DTMFTONE
+	call    _8880_ctrl_wr
+
+   call    T0_cptone
+   call    display_bufclr
+	ldw     rr0,#display_buffer
+   ldw     rr2,#msgtoni
+	ld      r4,#16
+	loop [r4] {
+	   lddd (rr0)+,(rr2)+
+	}             
+
+   set_bit P5DR,REL1       ;on hook
+   clr_bit P5DR,REL2       
+
+   loop {
+      
 	}
 
 
@@ -816,22 +824,46 @@ user_main::
 
 
 ;***************************************
-;************************** T0 underflow
+;************************ T0 interrupt 0
 ;***************************************
-_T0_RTC_int::
+_T0_int_0::
 	pushw   RPP                             ; Save RPP
 	push    PPR                             ; Save PPR
-	srp     #9*2                            ; Switch context  
-	;***********************                
-	spp     #T0D_PG                         ; Enable Timer_0 page
-	and     T_FLAGR,#0F7h                   ; Cler Timer_0 pending interrupt
+   srp     #(8*2)                          ; Switch context
+   ;***********************                
+   spp     #T0D_PG                         ; Enable Timer_0 page
+   and     T_FLAGR,#~(ouf | cp0 | cp1)     ; Clear Overflow/Underflow/Capture
 	spp     #0
 	;***********************
-	
+
+   or      P5DR,#1
+   delay   #20
+   and     P5DR,#~1
+
 	;***********************                
 	pop     PPR                             
 	popw    RPP                             ; Restore context    
 	iret                                    
+
+
+;***************************************
+;************************ T0 interrupt 1
+;***************************************
+_T0_int_1::
+   iret
+
+;***************************************
+;************************ T0 interrupt 2
+;***************************************
+_T0_int_2::
+   iret
+
+;***************************************
+;************************ T0 interrupt 3
+;***************************************
+_T0_int_3::
+   iret
+
 
 
 
@@ -856,7 +888,7 @@ _top_level_int::                                ; Top Level interrupt service ro
 ;***************************************
 ;****************** SCI errors interrupt
 ;***************************************
-_st9_it_s_rec_err::
+_SCI_it_s_rec_err::
 	iret
 
 
@@ -874,7 +906,7 @@ _SCI_9th_bit::
 ;***************************************
 ;**************** SCI TX empty interrupt
 ;***************************************
-_st9_it_transmit::
+_SCI_it_transmit::
 	iret
 
 
@@ -883,44 +915,64 @@ _st9_it_transmit::
 ;***************************************
 ;********************* SCI RX interrupt
 ;***************************************
-_st9_it_receive::
+_SCI_it_receive::
 	iret
 
 
 
 ;***************************************
-;******************** WD timer int 10ms
+;******************** WD timer int 50ms
 ;***************************************
-_A0_soft_int::
+_A0_int::
 	pushw   RPP                             ; Save RPP
 	push    PPR                             ; Save PPR
-	srp     #(9*2)                          ; Switch context  
+   srp     #(9*2)                          ; Switch context  
 	spp     #0
-	clr     EIPR
-	;***********************
-	call    display_update
+   clr     EIPR
+   ;***********************
+   call    display_update
 	;***********************                
 	pop     PPR                             
 	popw    RPP                             ; Restore context    
 	iret
 
+;***************************************
+;**************************** MT8880 IRQ
+;***************************************
+_A1_int::
+    iret
 
+;***************************************
+;************************* SPI Interrupt
+;***************************************
+_B0_int::
+	 iret
 
 ;***************************************
 ;******** external or Software interrupt
 ;***************************************
-_A1_soft_int::
-_B0_soft_int::
+_B1_int::
 	 iret
 
-_B1_soft_int::
-	 iret
+_C0_int::
+_C1_int::
+_D0_int::
+_D1_int::
+	pushw   RPP                             ; Save RPP
+	push    PPR                             ; Save PPR
+   srp     #(8*2)                          ; Switch context
+   clr     EIPR
 
-_C0_soft_int::
-_C1_soft_int::
-_D0_soft_int::
-_D1_soft_int::
-	 iret
+   or      P5DR,#1
+   delay   #20
+   and     P5DR,#~1
+
+	pop     PPR                             
+	popw    RPP                             ; Restore context    
+	iret                                    
+
+
+
 	 pushw   RPP                             ; Save RPP
 	 push    PPR                             ; Save PPR
 	 pushw   rr0                             
@@ -932,7 +984,6 @@ _D1_soft_int::
 	 clr     eipr
 	 ;and     EIMR,#~(ALARM1 | ALARM2 | ALARM3 | ALARM4)
 	 
-
 	 sdm
 	 ldw     rr0,#display_buffer
 	 ldw     rr2,#telesoccorso
@@ -1009,17 +1060,17 @@ display_init::
 
 display_return::
 	call    _display_ready
-	ld      P4DR,#01001111b                 ; set_dis_inst_wr_mode
-	ld      r0,#00000010b                   ; return home
+   ld      P4DR,#01001111b                   ; set_dis_inst_wr_mode
+   ld      r0,#00000010b                     ; return home
 	call    _display_write
 	ret
 
 display_bufclr::
 	ldw     rr8,#display_buffer
-	ld      r10,#32                         ; loop write 32 char
+   ld      r10,#32                           ; loop write 32 char
 	ld      r11,#00100000b
-	loop [r10] {                            ; fill display buffer
-		ld      (rr8)+,r11              ; with spaces
+   loop [r10] {                              ; fill display buffer
+      ld      (rr8)+,r11                     ; with spaces
 	}
 	ret
 
@@ -1030,28 +1081,28 @@ display_update:
 	pushuw  rr10
 	;***********************
 	call    _display_ready
-	ld      P4DR,#01001111b         ; scrittura istruzioni
-	ld      r0,#10000000b           ; first line (set address)
+   ld      P4DR,#01001111b                   ; scrittura istruzioni
+   ld      r0,#10000000b                     ; first line (set address)
 	call    _display_write
 	;***********************
 	ldw     rr8,#display_buffer
 	ld      r10,#16
-	loop [r10] {                    ; loop 16 times (a line)
+   loop [r10] {                              ; loop 16 times (a line)
 		call    _display_ready
-		ld      P4DR,#01101111b ; scrittura dati
+      ld      P4DR,#01101111b                ; scrittura dati
 		ld      r0,(rr8)+
 		call    _display_write
 	}
 	;***********************
 	call    _display_ready
-	ld      P4DR,#01001111b         ; scrittura istruzioni
-	ld      r0,#11000000b           ; second line (set address)
+   ld      P4DR,#01001111b                   ; scrittura istruzioni
+   ld      r0,#11000000b                     ; second line (set address)
 	call    _display_write
 	;***********************
 	ld      r10,#16
-	loop [r10] {                    ; loop 16 times (a line)
+   loop [r10] {                    ; loop 16 times (a line)
 		call    _display_ready
-		ld      P4DR,#01101111b ; scrittura dati
+      ld      P4DR,#01101111b      ; scrittura dati
 		ld      r0,(rr8)+
 		call    _display_write
 	}
@@ -1140,7 +1191,7 @@ _display_ready::
 	ldw     rr2,#10000              ; prova 10000 volte
 	loopw [rr2] {
 	   call    _display_read
-	   ifnobit r0,100000000b        ; controlla il BF
+      ifnobit r0,10000000b         ; controlla il BF
 	      break
 	   }
 	}
@@ -1158,14 +1209,14 @@ _display_ready::
 ;*************** Write data to EEPROM #1
 ;***************************************
 wr_data_to_E1::
-;        set_CSE1
+;  set_CSE1
 	ld      r0,#1b
 	rdwr_data_to_SPI
 	ld      r0,#01000000b
 	rdwr_data_to_SPI
 	ld      r0,#55h
 	rdwr_data_to_SPI
-;        rst_CSE1
+;  rst_CSE1
 	ret
 
 
@@ -1174,14 +1225,14 @@ wr_data_to_E1::
 ;*************** Read data to EEPROM #1
 ;***************************************
 rd_data_from_E1::
-;        set_CSE1
+;  set_CSE1
 	ld      r0,#1b
 	rdwr_data_to_SPI
 	ld      r0,#10000000b
 	rdwr_data_to_SPI
 	ld      r0,#00h
 	rdwr_data_to_SPI
-;        rst_CSE1
+;  rst_CSE1
 	ret
 
 
@@ -1195,8 +1246,8 @@ rd_data_from_E1::
 ;****************************************
 
 FlashLed::
-;        spp     #0
-;        srp     #0
+;  spp     #0
+;  srp     #0
 	loop [r1] {
 	   call    LedOn
 	   delay   #40000
@@ -1209,13 +1260,13 @@ FlashLed::
 LedOff::
 	cpl     r0
 	and     P2DR,r0
-;        clr_bit  P2DR,r0
+;  clr_bit  P2DR,r0
 	ret
 
 
 LedOn::
 	or      P2DR,r0
-;        set_bit  P2DR,r0
+;  set_bit  P2DR,r0
 	ret
 
 				    
@@ -1471,8 +1522,8 @@ rec_message::
 	   delay      #50000
 	}
 	set_bit    P7DR,RECN
-;        delay      #50000
-;        waitnobit  P7DR,#RECLEDN
+;  delay      #50000
+;  waitnobit  P7DR,#RECLEDN
 	popuw      rr0
 	popu    PPR
 	ret
@@ -1492,7 +1543,7 @@ play_message::
 	   delay      #50000
 	}
 	set_bit    P7DR,PLAYLN
-;        delay      #50000
+;  delay      #50000
 	popuw      rr0
 	popu    PPR
 	ret
@@ -1502,8 +1553,9 @@ play_message::
 ;**************************************************************************
 
 _frame_sample::
-	waitnobit  P2DR,#REMOTE                 ; depends on int triggering
-	ldw        rr0,#frame                   ; loads the frame buffer
+                                           ; time critical section begin
+   waitnobit  P2DR,#REMOTE                 ; depends on int triggering
+   ldw        rr0,#frame_buffer            ; loads the frame buffer
 	ldw        (rr0),#0                     ; zero the buffer
 	ld         r2,#2                        ; 2 samples of 6 bits
 	loop [r2] {                             ; 
@@ -1511,100 +1563,139 @@ _frame_sample::
 	   ld         r3,#6                     ; 
 	   loop [r3] {                          ; single bit sample loop
 	      delay      #320                   ; wait 390uS (to calibrate)
-	      ifbit P2DR,#REMOTE                ; 
-		 or         P5DR,#1
-		 ld         r5,#1               ; if level 1 r5 = 1
-	      } else {                          ;
-		 ld         r5,#0               ; else r5 = 0
-	      }                                 ;
-	      or         r4,r5                  ; add into shift register
+         ifbit P2DR,#REMOTE                ;
+            or         P5DR,#1
+            ld         r5,#1               ; if level 1 r5 = 1
+         } else {                          ;
+            ld         r5,#0               ; else r5 = 0
+         }                                 ;
+         or         r4,r5                  ; add into shift register
 	      rol        r4                     ; and shift left one bit
 	      delay      #150                   ; wait 130uS (to calibrate)
+         and        P5DR,#~1
 	      waitnobit  P2DR,#REMOTE           ; wait for 0
-	      and        P5DR,#~1
 	   }
-	   or         (rr0),r4                  ; and add into buffer
-	   incw       rr0                       ; 
+      ld         (rr0),r4                  ; put shift reg into buffer
+      incw       rr0                       ; increment buffer pointer
 	}
+                                           ; time critical section end
 	ret
+
+_remote_sample_old::
+	waitbit    P2DR,#REMOTE
+   delay      #80
+   waitnobit  P2DR,#REMOTE
+   delay      #5760                        ; first skip (to calibrate)
+   
+   call       _frame_sample                ; sample first frame
+;   ld    r6,#3                             ; other four samples
+;   loop  [r6] {
+;      ldw        rr8,(frame_buffer)        ; save previous frame
+;      waitbit    P2DR,#REMOTE
+;      delay      #80
+;      call       _frame_sample             ; sample next frame
+;      delay      #4000
+;      orw        (frame_buffer),rr8        ; defect-error logic
+;   }
+   ret
+
 
 _remote_sample::
-	waitbit    P2DR,#REMOTE
-	delay      #80
-	call       _frame_sample                ; sample first frame
-	ld    r6,#3                             ; other four samples
-	loop  [r6] {
-	   ldw        rr8,(frame)               ; save previous frame
-	   waitbit    P2DR,#REMOTE
-	   delay      #80
-	   call       _frame_sample             ; sample next frame
-	   delay      #4000
-	   orw        (frame),rr8               ; defect error eliminaton
-	}
-	ret
+   ld      EIMR,#00000000b
+   waitbit P2DR,#REMOTE
 
+   spp     #T0D_PG                         ; Set timer0 data page
+   or      T_FLAGR,#cp0
+   or      T_TCR,#cen
+   spp     #0
+
+   waitnobit  P2DR,#REMOTE
+   
+   delay   #5800
+
+   spp     #T0D_PG                         ; Set timer0 data page
+   and     T_TCR,#~cen
+   spp     #0
+
+   delay   #4000
+   ld      EIMR,#00000001b
+
+   ret
 
 
 ;***********************************************************************
 ;************************** Programmazione Timer 0
 ;***********************************************************************
-;* Programmed to generate interrupt on underflow event      
-;***********************************************************************
+
+;****************************************
+;*************** Sincronismi telecomando
+;****************************************
+
+T0_remote::        
+	pushuw  RPP
+	pushu   PPR
+	srp     #(15*2)                         ; Set register bank F
+	spp     #T0D_PG                         ; Set timer0 data page
+   ld      t_tcr,  #00000000b              ; Set timer control reg
+   ld      t_tmr,  #00000000b              ; Continuous/Retrigger mode
+	ld      t_icr,  #00000000b              ; Set input control reg
+   ld      t_idmr, #10000001b              ; Underflow interrupt
+   ld      t_prsr,#3                       ; 1 uSec prescaler value
+   ldw     t_reg0r,#400                    ; 400 uSec counter value 
+
+	spp     #T0C_PG                         ; Set timer0 control page
+   ld      t0_ivr,#T0_UNDERFLOW            ; Set int vector
+   ld      t0_idcr,#00000001b              ; Set Timer T0 int level=1
+	popu    PPR
+	popuw   RPP
+	ret
 	
-_T0_init::        
+;****************************************
+;**************** Sincronismi toni linea
+;****************************************
+
+T0_cptone::        
 	pushuw  RPP
 	pushu   PPR
 	srp     #(15*2)                         ; Set register bank F
 	spp     #T0D_PG                         ; Set timer0 data page
 	sdm
 	ld      t_tcr,  #00000000b              ; Set timer control reg
-	ld      t_tmr,  #00000010b              ; Set timer mode reg
+   ld      t_tmr,  #00000000b              ; Set timer mode reg
 	ld      t_icr,  #00000000b              ; Set input control reg
 	ld      t_idmr, #10000001b              ; Enable timer T0 interrupt
-						; on underflow event
-	ld      t_prsr,(t0_prescaler)           ; Load prescaler value
-	ldw     t_reg0r,(t0_capture0)           ; Load capture0 value 
-	ldw     t_reg1r,(t0_capture1)           ; Load capture1 value 
-	ldw     t_cmp0r,(t0_compare0)           ; Load compare0 value 
-	ldw     t_cmp1r,(t0_compare1)           ; Load compare1 value
+                                           ; on underflow event
+	ld      t_prsr,#0                       ; Load prescaler value
+	ldw     t_reg0r,#0                      ; Load capture0 value 
+	ldw     t_reg1r,#0                      ; Load capture1 value 
+	ldw     t_cmp0r,#0                      ; Load compare0 value 
+	ldw     t_cmp1r,#0                      ; Load compare1 value
 
 	spp     #T0C_PG                         ; Set timer0 control page
-	ld      t0_ivr,#T0_UNDERFLOW            ; Set int vector
+   ld      t0_ivr,#T0_UNDERFLOW+2            ; Set int vector
 	ld      t0_idcr,#00000001b              ; Set Timer T0 int level=1
 	popu    PPR
 	popuw   RPP
 	ret
-	
 
 
 ;**************************************************************************
 ;*************************** Definizione dei dati *************************
 ;**************************************************************************
     
-			.data
-		       ;.org    0
+   .data
+  ;.org    0
 
 ;//////////////////////// per usare emulatore /////////////////
-			.org 200h
+   .org 200h
 ;//////////////////////////////////////////////////////////////
 
 ;****************************************
 ;***************** Buffers e flags vari
 ;****************************************
 display_buffer::        .blkb   32              ; display buffer of 32 char
-dummy::                 .blkw   32
-frame::                 .blkw   4               ; format: 0xxxxxx00xxxxxx0
+frame_buffer::          .blkw   2               ; format: 0xxxxxx00xxxxxx0
 combtel_buffer::        .blkb   16              ; buffer of 32 numbers
-
-;****************************************
-;***************** Valori del Timer 0
-;****************************************
-t0_prescaler::          .blkb   1
-t0_capture0::           .blkw   1
-t0_capture1::           .blkw   1
-t0_compare0::           .blkw   1
-t0_compare1::           .blkw   1
-
 
 ;****************************************
 ;**************** Messaggi per il display
@@ -1616,6 +1707,5 @@ telesoccorso::          .ascii  "Il telesoccorso:"
 telecomando::           .ascii  "Il telecomando: "
 aiuto::                 .ascii  "Richiesta aiuto!"
 copyright::             .ascii  "Copyright (c) 97NOVA - A. Tuccia"
-
-
+msgtoni::               .ascii  "Toni della linea"
 

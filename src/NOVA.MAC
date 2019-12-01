@@ -20,25 +20,25 @@
 
 ;************************             
 .macro  set_bit dest,mask                       ;\
-	or      dest,#mask                      ; |
+   or      dest,#mask                           ; |
 .endm                                           ; |
 ;************************                       ; | Bit macro
 .macro  clr_bit dest,mask                       ; | with immediate
-	and     dest,#~mask                     ; | mask
+   and     dest,#~mask                          ; | mask
 .endm                                           ; | 
 ;************************                       ; | 
 .macro  cpl_bit dest,mask                       ; |
-	xor     dest,#mask                      ; | 
+   xor     dest,#mask                           ; | 
 .endm                                           ;/ 
 ;************************                       
 .macro  ld_mm   dst,src                         ;\  Make a byte memory to
-	ld      r0,src                          ; | memory load with immediate
-	ld      dst,r0                          ; | address
+   ld      r0,src                               ; | memory load with immediate
+   ld      dst,r0                               ; | address
 .endm                                           ;/  
 ;************************                       
 .macro  ldw_mm  dst,src                         ;\  Make a word memory to
-	ldw     rr0,src                         ; | memory load with immediate
-	ldw     dst,rr0                         ; | address
+   ldw     rr0,src                              ; | memory load with immediate
+   ldw     dst,rr0                              ; | address
 .endm                                           ;/  
 ;************************                       
 .macro  clrw    op
@@ -46,33 +46,35 @@
 .endm
 ;************************                       
 .macro  cpl2_w  wr                              ;\
-	cpl     r#wr                            ; |
-	cpl     r#(wr+1)                        ; | 2 complememt word
-	incw    rr#wr                           ; |
+   cpl     r#wr                                 ; |
+   cpl     r#(wr+1)                             ; | 2 complememt word
+   incw    rr#wr                                ; |
 .endm                                           ;/
 ;************************                       
 .macro  T0_start
 	pushu   PPR
 	spp     #T0D_PG
-	or      T_TCR,#10000000b
+;   and     T_TCR,#~ccl
+   or      T_TCR,#cen
 	popu    PPR
 .endm
 ;************************
 .macro  T0_stop
 	pushu   PPR
 	spp     #T0D_PG
-	and     T_TCR,#01111111b
-	popu    PPR
+   and     T_TCR,#~cen
+;   or      T_TCR,#ccl
+   popu    PPR
 .endm
 ;************************
 .macro  rdwr_data_to_SPI                       
 	do {                                    ;\
-		tm      SPICR,#10h              ; | wait SPI empty
+      tm      SPICR,#10h                   ; | wait SPI empty
 	} while [ CLZ ]                         ; |
 	ld      SPIDR,r0                        ; | r0 -> SPIDR
 	nop                                     ; |
 	do {                                    ; |
-		tm      SPICR,#10h              ; | wait SPI empty
+      tm      SPICR,#10h                   ; | wait SPI empty
 	} while [ CLZ ]                         ; | SPIDR -> r0
 	ld      r0,SPIDR                        ;/
 .endm
