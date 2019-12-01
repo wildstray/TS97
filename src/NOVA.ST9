@@ -106,8 +106,6 @@ T0_UNDERFLOW    = 0C0h                  ; T0 int vector
 START_CODE      = 100h                  ; Start of C startup code
 
 
-
-
 ;**************************************************************************
 ;**************** Internal register variable allocations ******************
 ;**************************************************************************
@@ -399,7 +397,7 @@ Init_IO_port:
 	spp     #2                              ; Enable page 2
        
 	ld      p2c2r,#10001111b                ;\ 
-	ld      p2c1r,#11101110b                ; | Set port 2
+	ld      p2c1r,#01101110b                ; | Set port 2
 	ld      p2c0r,#11011111b                ;/
        
        ;emulator board  ^     ^
@@ -496,7 +494,7 @@ Init_IO_port:
 ;***************************************
 	spp     #WDT_PG                         ; Set Watch_dog timer page
 	ld      wdtpr,#29                       ; Prescaler value
-	ldw     wdtr ,#1000                     ; Number to count 
+	ldw     wdtr ,#5000                     ; Number to count 
 	ld      wdtcr,#00110000b                ; Continuous mode / Timer
 	
 
@@ -543,7 +541,6 @@ main::
 	spp     #0                              ; Set Page 0
 	srp     #0                              ; Set register bank 0
 	call    display_init
-	call    _display_bufclr
 	call    _8880_init
 	;start_T0_timer
 	
@@ -561,7 +558,6 @@ xxx::
 	loop [r4] {
 	   lddd (rr0)+,(rr2)+
 	}
-	;call display_update
 	;//////////////////////////////////////////
 
 	;call     att_viva_voce
@@ -771,6 +767,40 @@ stop::
 
 
 
+rem::
+	sdm
+	call    display_bufclr
+	ldw     rr0,#display_buffer
+	ldw     rr2,#telecomando
+	ld      r4,#16
+	loop [r4] {
+	   lddd (rr0)+,(rr2)+
+	}             
+	loop {
+	   call    _remote_sample
+	   ldw     rr6,#display_buffer+16
+	   ldw     rr8,(frame)
+	   ld      r1,#16
+	   loop [r1] 
+	   {
+	      ld      r2,#48
+	      ifbitw  rr8,#1000000000000000b
+		 ld      r2,#49
+	      }
+	      rlcw    rr8
+	      
+	      ld      (rr6)+,r2
+	   }
+	   delay #60000
+	   delay #60000
+	   delay #60000
+	   delay #60000
+	   delay #60000
+	   waitnobit P2DR,#REMOTE
+	   ifbit P2DR,#REMOTE
+	      delay #9000
+	   }
+	}
 
 
 user_main::
@@ -864,8 +894,9 @@ _st9_it_receive::
 _A0_soft_int::
 	pushw   RPP                             ; Save RPP
 	push    PPR                             ; Save PPR
-	srp     #9*2                            ; Switch context  
-	clr     eipr
+	srp     #(9*2)                          ; Switch context  
+	spp     #0
+	clr     EIPR
 	;***********************
 	call    display_update
 	;***********************                
@@ -889,6 +920,7 @@ _C0_soft_int::
 _C1_soft_int::
 _D0_soft_int::
 _D1_soft_int::
+	 iret
 	 pushw   RPP                             ; Save RPP
 	 push    PPR                             ; Save PPR
 	 pushw   rr0                             
@@ -898,7 +930,7 @@ _D1_soft_int::
 	 srp     #0                              ; Set register bank 0
 	 spp     #0
 	 clr     eipr
-	 and     EIMR,#~(ALARM1 | ALARM2 | ALARM3 | ALARM4)
+	 ;and     EIMR,#~(ALARM1 | ALARM2 | ALARM3 | ALARM4)
 	 
 
 	 sdm
@@ -938,7 +970,7 @@ display_init::
 	;***********************    
 	ld      r0,#00110000b                   ;\
 	call    _display_nibble_wr              ; |
-	delay   #1000                           ; | 
+	delay   #4000                           ; | 
 	ld      r0,#00110000b                   ; |
 	call    _display_nibble_wr              ; | display software reset
 	delay   #100                            ; | 
@@ -952,19 +984,19 @@ display_init::
 	;***********************
 	call    _display_ready
 	ld      r0,#00101000b                   ; set 2 lines, 5*7 font
-	call    display_write
+	call    _display_write
 	;***********************
 	call    _display_ready
 	ld      r0,#00001000b                   ; display off
-	call    display_write
+	call    _display_write
 	;***********************
 	call    _display_ready
 	ld      r0,#00001110b                   ; display on
-	call    display_write
+	call    _display_write
 	;***********************
 	call    _display_ready
 	ld      r0,#00000110b                   ; entry mode set
-	call    display_write
+	call    _display_write
 
 	ret
 
@@ -979,7 +1011,7 @@ display_return::
 	call    _display_ready
 	ld      P4DR,#01001111b                 ; set_dis_inst_wr_mode
 	ld      r0,#00000010b                   ; return home
-	call    display_write
+	call    _display_write
 	ret
 
 display_bufclr::
@@ -995,10 +1027,12 @@ display_update:
 	pushuw  rr0
 	pushuw  rr2
 	pushuw  rr8
+	pushuw  rr10
+	;***********************
 	call    _display_ready
 	ld      P4DR,#01001111b         ; scrittura istruzioni
 	ld      r0,#10000000b           ; first line (set address)
-	call    display_write
+	call    _display_write
 	;***********************
 	ldw     rr8,#display_buffer
 	ld      r10,#16
@@ -1006,21 +1040,22 @@ display_update:
 		call    _display_ready
 		ld      P4DR,#01101111b ; scrittura dati
 		ld      r0,(rr8)+
-		call    display_write
+		call    _display_write
 	}
 	;***********************
 	call    _display_ready
 	ld      P4DR,#01001111b         ; scrittura istruzioni
 	ld      r0,#11000000b           ; second line (set address)
-	call    display_write
+	call    _display_write
 	;***********************
 	ld      r10,#16
 	loop [r10] {                    ; loop 16 times (a line)
 		call    _display_ready
 		ld      P4DR,#01101111b ; scrittura dati
 		ld      r0,(rr8)+
-		call    display_write
+		call    _display_write
 	}
+	popuw   rr10
 	popuw   rr8
 	popuw   rr2
 	popuw   rr0
@@ -1043,7 +1078,7 @@ _display_nibble_wr::
 	ld      r2,P4DR
 	and     r2,#11110000b             
 	or      r0,r2
-	ld      P4DR,r0
+	ld      P4DR,r0                 ; write
 	;***********************
 	and     P7DR,#11111011b         ; reset bit 2
 	;***********************
@@ -1062,7 +1097,7 @@ _display_nibble_rd::
 	and     P7DR,#11111011b         ; reset bit 2
 	;***********************
 	nop
-	ld      r0,P4DR                 ; legge 
+	ld      r0,P4DR                 ; read
 	and     r0,#00001111b
 	swap    r0
 	;*********************** 
@@ -1073,7 +1108,7 @@ _display_nibble_rd::
 ;***************************************
 ;******************** display char write
 ;***************************************
-display_write::
+_display_write::
 	pushu   r0
 	call    _display_nibble_wr
 	popu    r0
@@ -1084,7 +1119,7 @@ display_write::
 ;***************************************
 ;******************** display char write
 ;***************************************
-display_read::
+_display_read::
 	call    _display_nibble_rd
 	ld      r1,r0
 	call    _display_nibble_rd
@@ -1097,67 +1132,20 @@ display_read::
 ;******************** is display ready ?
 ;***************************************
 _display_ready:: 
-
 	pushu   P4DR
 	spp     #P7D_PG                 
 	;***********************
 	ld      P4DR,#01011111b         ; modo instruzioni & read
 	;***********************
-	ldw     rr2,#1000               ; prova 1000 volte
+	ldw     rr2,#10000              ; prova 10000 volte
 	loopw [rr2] {
-	   call    display_read
+	   call    _display_read
 	   ifnobit r0,100000000b        ; controlla il BF
 	      break
 	   }
 	}
 	popu    P4DR
 	ret
-
-rem::
-	sdm
-	ldw     rr0,#display_buffer
-	ldw     rr2,#telecomando
-	ld      r4,#16
-	loop [r4] {
-	   lddd (rr0)+,(rr2)+
-	}             
-	ldw    (frame),#0000000110010001b
-	loop {
-	   ;loop {
-	   ;   ifbit   P2DR,#REMOTE
-	   ;      break
-	   ;   }
-	   ;}
-	   ;waitbit P2DR,#REMOTE
-	   ;call    _frame_sample
-	   ldw     rr6,#display_buffer+16
-	   ld      r8,(frame)
-	   ld      r1,8
-	   loop [r1] 
-	   {
-	      ld      r2,#48
-	      ifbit   r8,#10000000b
-		 ld      r2,#49
-	      }
-	      sla     r8
-	      
-	      ld      (rr6)+,r2
-	   }
-	   ld      r8,(frame+1)
-	   ld      r1,8
-	   loop [r1] 
-	   {
-	      ld      r2,#48
-	      ifbit   r8,#10000000b
-		 ld      r2,#49
-	      }
-	      sla     r8
-	      
-	      ld      (rr6)+,r2
-	   }
-	}
-	
-
 
 
 ;**************************************************************************
@@ -1514,49 +1502,44 @@ play_message::
 ;**************************************************************************
 
 _frame_sample::
-
 	waitnobit  P2DR,#REMOTE                 ; depends on int triggering
-
-	ldw        rr12,#frame                  ; loads the frame buffer
-	ldw        (rr12),#0                    ; zero the buffer
-
-	ld         r7,2                         ; for 12 samples
-	loop [r7] {                             ; repeat 2 times
-
-	   ld         r9,6                      ; 6 samples
-	   ld         r10,0                     ; zero the shift register
-
-	   loop [r9] {                          ; single bit sample loop
-
-	      delay      #350                   ; wait 390uS (to calibrate)
-	      ld         r6,P2DR                ;
-	      and        r6,#REMOTE             ; only remote is sampled!
-
-	      inc        r10                    ; increment the shift reg
-
-	      ld         r11,r10                ; loop for r6 times
-	      loop [r11] {
-		 sra        r6                  ; shift the sampled bit
-	      }
-	   
-	      or         (rr12),r6              ; and add into buffer
-
-	      delay      #100                   ; wait 130uS (to calibrate)
-	      waitnobit  P2DR,#10000000b        ; wait for 0
-
+	ldw        rr0,#frame                   ; loads the frame buffer
+	ldw        (rr0),#0                     ; zero the buffer
+	ld         r2,#2                        ; 2 samples of 6 bits
+	loop [r2] {                             ; 
+	   ld         r4,#0                     ; zero the shift register
+	   ld         r3,#6                     ; 
+	   loop [r3] {                          ; single bit sample loop
+	      delay      #320                   ; wait 390uS (to calibrate)
+	      ifbit P2DR,#REMOTE                ; 
+		 or         P5DR,#1
+		 ld         r5,#1               ; if level 1 r5 = 1
+	      } else {                          ;
+		 ld         r5,#0               ; else r5 = 0
+	      }                                 ;
+	      or         r4,r5                  ; add into shift register
+	      rol        r4                     ; and shift left one bit
+	      delay      #150                   ; wait 130uS (to calibrate)
+	      waitnobit  P2DR,#REMOTE           ; wait for 0
+	      and        P5DR,#~1
 	   }
-
-	   incw       rr12                      ; 
+	   or         (rr0),r4                  ; and add into buffer
+	   incw       rr0                       ; 
 	}
 	ret
 
 _remote_sample::
-	ld    r6,3                              ; sample three times
+	waitbit    P2DR,#REMOTE
+	delay      #80
+	call       _frame_sample                ; sample first frame
+	ld    r6,#3                             ; other four samples
 	loop  [r6] {
-	   ldw        rr14,(frame)              ; save previous frame
+	   ldw        rr8,(frame)               ; save previous frame
+	   waitbit    P2DR,#REMOTE
+	   delay      #80
 	   call       _frame_sample             ; sample next frame
-						
-	  
+	   delay      #4000
+	   orw        (frame),rr8               ; defect error eliminaton
 	}
 	ret
 
@@ -1564,12 +1547,9 @@ _remote_sample::
 
 ;***********************************************************************
 ;************************** Programmazione Timer 0
-;************************** rr0 = capture0 value (in usec)
-;************************** rr2 = capture1 value (in usec)
 ;***********************************************************************
-;* Programmed to generate interrupt on
-;* underflow event      
-;***********************
+;* Programmed to generate interrupt on underflow event      
+;***********************************************************************
 	
 _T0_init::        
 	pushuw  RPP
@@ -1582,11 +1562,11 @@ _T0_init::
 	ld      t_icr,  #00000000b              ; Set input control reg
 	ld      t_idmr, #10000001b              ; Enable timer T0 interrupt
 						; on underflow event
-	ld      t_prsr,#2                       ; Load prescaler value
-	ldw     t_reg0r,(t0_capture0)           ; Load timer value 
-	ldw     t_reg1r,(t0_capture1)           ; Load timer value
-	ldw     t_cmp0r,(t0_capture0)           ; Load timer value 
-	ldw     t_cmp1r,(t0_capture1)           ; Load timer value
+	ld      t_prsr,(t0_prescaler)           ; Load prescaler value
+	ldw     t_reg0r,(t0_capture0)           ; Load capture0 value 
+	ldw     t_reg1r,(t0_capture1)           ; Load capture1 value 
+	ldw     t_cmp0r,(t0_compare0)           ; Load compare0 value 
+	ldw     t_cmp1r,(t0_compare1)           ; Load compare1 value
 
 	spp     #T0C_PG                         ; Set timer0 control page
 	ld      t0_ivr,#T0_UNDERFLOW            ; Set int vector
@@ -1611,15 +1591,15 @@ _T0_init::
 ;****************************************
 ;***************** Buffers e flags vari
 ;****************************************
-;frame::                 .blkw   2               ; format: 0xxxxxx00xxxxxx0
-frame::                 .blkw   1 
-display_buffer::        .blkw   16
-combtel_flags::         .blkb   1
-combtel_buffer::        .blkb   16
+display_buffer::        .blkb   32              ; display buffer of 32 char
+dummy::                 .blkw   32
+frame::                 .blkw   4               ; format: 0xxxxxx00xxxxxx0
+combtel_buffer::        .blkb   16              ; buffer of 32 numbers
 
 ;****************************************
 ;***************** Valori del Timer 0
 ;****************************************
+t0_prescaler::          .blkb   1
 t0_capture0::           .blkw   1
 t0_capture1::           .blkw   1
 t0_compare0::           .blkw   1
