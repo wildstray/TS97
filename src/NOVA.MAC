@@ -109,59 +109,38 @@
 .endm
 ;************************
 .macro   spi_di       
-   and   EIPR,#~ipb0m
-   and   EIMR,#~ib0m 
+   and   EIPR,#~ipspi
+   and   EIMR,#~ispi
 .endm
 ;************************
 .macro   spi_ei
-   and   EIPR,#~ipb0m  
+   and   EIPR,#~ipspi  
 	nop
-   or    EIMR,#ib0m    
+   or    EIMR,#ispi    
 .endm
 ;************************
 .macro   remote_di       
-   .ifc df EMU
-   and   EIPR,#~ipd1m
-   and   EIMR,#~id1m
-   .endc
-   .ifc ndf EMU
-   and   EIPR,#~ipb1m
-   and   EIMR,#~ib1m
-   .endc
+   and   EIPR,#~iprem
+   and   EIMR,#~irem
 .endm
 ;************************
 .macro   remote_ei
-   .ifc df EMU
-   and   EIPR,#~ipd1m  
+   and   EIPR,#~iprem  
 	nop
-   or    EIMR,#id1m    
-   .endc
-   .ifc ndf EMU
-   and   EIPR,#~ipb1m  
-	nop
-   or    EIMR,#ib1m    
-   .endc
+   or    EIMR,#irem  
 .endm
 ;************************
 .macro   _8880_di       
-   .ifc df EMU
-   and   EIPR,#~ipa1m
-   and   EIMR,#~ia1m 
-   .endc
-   .ifc ndf EMU
+   and   EIPR,#~ip8880
+   and   EIMR,#~i8880
    ld    DTMF_S,#0
-   .endc
 .endm
 ;************************
 .macro   _8880_ei
-   .ifc df EMU
-   and   EIPR,#~ipa1m  
+   and   EIPR,#~ip8880  
 	nop
-   or    EIMR,#ia1m    
-   .endc
-   .ifc ndf EMU
+   or    EIMR,#i8880    
    ld    DTMF_S,#1
-   .endc
 .endm
 ;************************
 .macro   relay1 status

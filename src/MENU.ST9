@@ -1,0 +1,183 @@
+;**************
+;******* Bank 5                         ; User menu functions area
+;**************
+;       :=RR94                          ;
+;       :=RR92                          ;
+;       :=R91                           ; break.char
+;       :=R90                           ; break.pos-1
+;       :=R89                           ; break.pos+1
+;       :=R88                           ; maxval.prec
+;       :=R87                           ; maxval.val
+;       :=R86                           ; minval.pos
+;       :=R85                           ; maxval.prec
+;       :=R84                           ; maxval.val
+;       :=R83                           ; maxval.pos
+;       :=R82                           ; input.backch
+;       :=R81                           ; input.pos+len
+;       :=R80                           ; input.pos+1
+
+
+;************************
+.macro .input pos,len,backch
+   pushu   #backch
+   pushu   #pos
+   pushu   #len
+   
+   srp     (5*2)
+
+   popu    r15
+   popu    r14
+   popu    r13
+   ld      r12,r14
+   add     r15,r14
+   inc     r14
+   loop
+   {
+      ld      r1,DIGIT
+      clr     DIGIT
+      if [[r8 >= r12] && [r8 <= r15]]
+      {
+.endm
+;************************
+.macro .maxval pos,val,prec
+         .ifc b prec
+         if [[r1 > #val] && [r1 < #10] && [r8 == #pos]]
+         {
+            clr     r1
+         }
+         .endc
+         .ifc nb prec
+         ld      r9,-(rr10)
+         if [[r9 < #10] && [r9 >= #prec] && [r1 > #val] && [r1 < #10] && [r8 == #pos]]
+         {
+           clr     r1
+         }
+         incw    rr10
+         .endc
+.endm
+;************************
+.macro .minval pos,val,prec
+         .ifc b prec
+         if [[r1 == #10] && [r8 == #pos]]
+         {
+            clr     r1
+         }
+         if [[r1 < #val] && [r1 < #10] && [r8 == #pos]]
+         {
+            clr     r1
+         }
+         .endc
+         .ifc nb prec
+         ld      r9,-(rr10)
+         dtmf2bcd r9,r9
+         if [[r9 <= #prec] && [r1 == #10] && [r8 == #pos]]
+         {
+            clr     r1
+         }
+         if [[r9 <= #prec] && [r1 < #val] && [r1 < #10] && [r8 == #pos]]
+         {
+           clr     r1
+         }
+         incw    rr10
+         .endc
+.endm
+;************************
+.macro .break pos,char
+         if [[r1 != #0] && [r1 <= #10] && [r8 == #pos-1]]
+         {
+            bcd2ascii  r1,r9
+            ld      (rr6)+,r9
+            ld      (rr10)+,r1
+            ld      r9,#char
+            ld      (rr6)+,r9
+            ld      r9,#95
+            ld      (rr6),r9
+            inc     r8
+            inc     r8
+            clr     r1
+         }
+         if [[r1 == #FORWBACK] && [r8 == #pos+1]]
+         {
+            if [r13 == #32]
+            {
+               ld      r1,#0
+               ld      -(rr10),r1
+               ld      r9,r13
+            } else {
+               ld      r13,(rr10)
+               bcd2ascii r13,r9
+               decw    rr10 
+            }
+            ld      (rr6),r9
+            ld      r9,#char 
+            ld      -(rr6),r9
+            dec     r8
+            ld      r9,#95
+            ld      -(rr6),r9
+            dec     r8
+            clr     r1
+         }
+.endm
+;************************
+.macro .endinput
+         if [[r1 != #0] && [r1 <= #10] && [r8 < r15]]
+         {
+            bcd2ascii  r1,r9
+            ld      (rr6)+,r9
+            ld      (rr10)+,r1
+            ld      r9,#95
+            ld      (rr6),r9
+            inc     r8
+            clr     r1
+         }
+         if [[r1 == #FORWBACK] && [r8 == r15]]
+         {
+            ld      r9,#32
+            ld      (rr6),r9
+            decw    rr10
+            ld      r9,#95
+            ld      -(rr6),r9
+            dec     r8
+            clr     r1
+         }
+         if [[r1 == #FORWBACK] && [r8 >= r14]] 
+         {
+            if [r13 == #32]
+            {
+               ld      r1,#0
+               ld      -(rr10),r1
+               ld      r9,r13
+            } else {
+               ld      r13,(rr10)
+               bcd2ascii r13,r9
+               decw    rr10 
+            }
+            ld      (rr6),r9
+            ld      r9,#95
+            ld      -(rr6),r9
+            dec     r8
+            clr     r1
+         }
+         if [[r1 == #CONFIRM] && [r8 == r15]]
+         {
+            ld      r9,#32
+            ld      (rr6),r9
+            break
+         }
+         if [r1 == #CONFIRM]
+         {
+            ld      r13,(rr10)
+            if [r13 == #0]
+            {
+               ld      r9,#32
+            } else {
+               bcd2ascii r13,r9
+            }
+            ld      (rr6),r9
+            break
+         }
+      }
+      clr     r1
+   }
+.endm
+;************************

@@ -26,26 +26,36 @@
    }
 .endm
 ;************************
-.macro  print  where,msg1,msg2
-   pushuw  rr0
-   pushuw  rr2
-   pushu   r4
-   ldw     rr0,#where
-   ldw     rr2,msg1
-   ld      r4,#16
-   loop [r4] {
-      lddp (rr0)+,(rr2)+
-   }
+;.macro  print  where,msg1,msg2
+.macro  print  msg1,msg2
+   ldw     RR92,msg1
    .ifc nb msg2
-   ldw     rr2,msg2
-   ld      r4,#16
-   loop [r4] {
-      lddp (rr0)+,(rr2)+
-   }
+   ldw     RR94,msg2
    .endc
-   popu    r4
-   popuw   rr2
-   popuw   rr0
+   .ifc b msg2
+   ldw     RR94,#0
+   .endc
+   call    _print
+;   pushuw  rr0
+;   pushuw  rr2
+;   pushu   r4
+;   ldw     rr0,#where
+;   ldw     rr2,msg1
+;   ld      r4,#16
+;   loop [r4] {
+;      lddp (rr0)+,(rr2)+
+;   }
+;   .ifc nb msg2
+;   ldw     rr2,msg2
+;   ld      r4,#16
+;   loop [r4] {
+;      lddp (rr0)+,(rr2)+
+;   }
+;   .endc
+;   popu    r4
+;   popuw   rr2
+;   popuw   rr0
+;   ret
 .endm
 ;************************
 .macro .menu maxmenu
@@ -69,15 +79,15 @@
       inc      r2
 .endm
 ;************************
-.macro .display num,text1,text2,calls
+.macro .display num,text1,text2,funct
    if [r2 == num]
    {
-      print line1,#text1
+      print #line1,#text1
       .ifc nb text2
-      print line2,#text2
+      print #line2,#text2
       .endc
-      .ifc nb calls
-      call  calls
+      .ifc nb funct
+      call  funct
       .endc
    }
 .endm
@@ -102,153 +112,54 @@
    }
 .endm
 ;************************
-.macro .input minpos,maxpos,backch
-   ld      r13,#backch
-   ld      r15,#maxpos+1
-   ld      r14,#minpos+1
+.macro .input pos,len,backch
+   ld      R80,#pos+1
+   ld      R82,#backch
+   ld      R81,#pos
+   add     R81,#len
    loop
    {
       ld      r1,DIGIT
       clr     DIGIT
-      if [[r8 >= minpos] && [r8 <= r15]]
+      if [[r8 >= #pos] && [r8 <= R81]]
       {
 .endm
 ;************************
 .macro .maxval pos,val,prec
+         ld      R83,#pos
+         ld      R84,#val
          .ifc b prec
-         if [[r1 > #val] && [r1 < #10] && [r8 == #pos]]
-         {
-            clr     r1
-         }
+         ld      R85,#0xFF
          .endc
          .ifc nb prec
-         ld      r9,-(rr10)
-         if [[r9 < #10] && [r9 >= #prec] && [r1 > #val] && [r1 < #10] && [r8 == #pos]]
-         {
-           clr     r1
-         }
-         incw    rr10
+         ld      R85,#prec
          .endc
+         call    _maxval
 .endm
 ;************************
 .macro .minval pos,val,prec
+         ld      R86,#pos
+         ld      R87,#val
          .ifc b prec
-         if [[r1 == #10] && [r8 == #pos]]
-         {
-            clr     r1
-         }
-         if [[r1 < #val] && [r1 < #10] && [r8 == #pos]]
-         {
-            clr     r1
-         }
+         ld      R88,#0xFF
          .endc
          .ifc nb prec
-         ld      r9,-(rr10)
-         dtmf2bcd r9,r9
-         if [[r9 <= #prec] && [r1 == #10] && [r8 == #pos]]
-         {
-            clr     r1
-         }
-         if [[r9 <= #prec] && [r1 < #val] && [r1 < #10] && [r8 == #pos]]
-         {
-           clr     r1
-         }
-         incw    rr10
+         ld      R88,#prec
          .endc
+         call    _minval
 .endm
 ;************************
 .macro .break pos,char
-         if [[r1 != #0] && [r1 <= #10] && [r8 == #pos-1]]
-         {
-            bcd2ascii  r1,r9
-            ld      (rr6)+,r9
-            ld      (rr10)+,r1
-            ld      r9,#char
-            ld      (rr6)+,r9
-            ld      r9,#95
-            ld      (rr6),r9
-            inc     r8
-            inc     r8
-            clr     r1
-         }
-         if [[r1 == #FORWBACK] && [r8 == #pos+1]]
-         {
-            if [r13 == #32]
-            {
-               ld      r1,#0
-               ld      -(rr10),r1
-               ld      r9,r13
-            } else {
-               ld      r13,(rr10)
-               bcd2ascii r13,r9
-               decw    rr10 
-            }
-            ld      (rr6),r9
-            ld      r9,#char 
-            ld      -(rr6),r9
-            dec     r8
-            ld      r9,#95
-            ld      -(rr6),r9
-            dec     r8
-            clr     r1
-         }
+         ld      R89,#pos+1
+         ld      R90,#pos-1
+         ld      R91,#char
+         call    _break
 .endm
 ;************************
 .macro .endinput
-         if [[r1 != #0] && [r1 <= #10] && [r8 < r15]]
+         call    _endinput
+         if [r1 == #0xFF]
          {
-            bcd2ascii  r1,r9
-            ld      (rr6)+,r9
-            ld      (rr10)+,r1
-            ld      r9,#95
-            ld      (rr6),r9
-            inc     r8
-            clr     r1
-         }
-         if [[r1 == #FORWBACK] && [r8 == r15]]
-         {
-            ld      r9,#32
-            ld      (rr6),r9
-            decw    rr10
-            ld      r9,#95
-            ld      -(rr6),r9
-            dec     r8
-            clr     r1
-         }
-         if [[r1 == #FORWBACK] && [r8 >= r14]] 
-         {
-            if [r13 == #32]
-            {
-               ld      r1,#0
-               ld      -(rr10),r1
-               ld      r9,r13
-            } else {
-               ld      r13,(rr10)
-               bcd2ascii r13,r9
-               decw    rr10 
-            }
-            ld      (rr6),r9
-            ld      r9,#95
-            ld      -(rr6),r9
-            dec     r8
-            clr     r1
-         }
-         if [[r1 == #CONFIRM] && [r8 == r15]]
-         {
-            ld      r9,#32
-            ld      (rr6),r9
-            break
-         }
-         if [r1 == #CONFIRM]
-         {
-            ld      r13,(rr10)
-            if [r13 == #0]
-            {
-               ld      r9,#32
-            } else {
-               bcd2ascii r13,r9
-            }
-            ld      (rr6),r9
             break
          }
       }
