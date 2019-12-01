@@ -16,6 +16,7 @@
 ;* relay2               on/off          ; eccita/diseccita il relay 2
 ;* led1                 on/off          ; accende/spegne il led 1
 ;* led2                 on/off          ; accende/spegne il led 2
+;* backled              on/off          ; accende/spegne il backlight
 ;* spi_di                               ; disable SPI interrupt
 ;* spi_ei                               ; enable SPI interrupt
 ;* remote_di                            ; disable REMOTE interrupt
@@ -117,14 +118,14 @@
 .endm
 ;************************
 .macro   remote_di       
-   and   EIPR,#~ipd1m
-   and   EIMR,#~id1m 
+   and   EIPR,#~ipb1m
+   and   EIMR,#~ib1m 
 .endm
 ;************************
 .macro   remote_ei
-   and   EIPR,#~ipd1m  
+   and   EIPR,#~ipb1m  
 	nop
-   or    EIMR,#id1m    
+   or    EIMR,#ib1m    
 .endm
 ;************************
 .macro   _8880_di       
@@ -182,6 +183,18 @@
       and     P2DR,#~LED2
    } else {
       or      P2DR,#LED2
+   }
+   popu  r0
+.endm
+;************************
+.macro   backled status
+   pushu r0
+   ld    r0,#status
+   if [r0 == off]
+   {
+      and     P2DR,#~BACKLIGHT
+   } else {
+      or      P2DR,#BACKLIGHT
    }
    popu  r0
 .endm

@@ -53,11 +53,11 @@
 ;***************************************
 ;********************* STACK Declaration
 ;***************************************
-;SSTACK      := (15 * 16)               ; System stack address group C B
-;USTACK      := (12 * 16)               ; User stack address group A
+SSTACK      := (15 * 16)               ; System stack address group C B
+USTACK      := (12 * 16)               ; User stack address group A
 ;//////////////////////// per usare emulatore///////////////////
-SSTACK      := (13 * 16)                ; System stack address group C B
-USTACK      := (11 * 16)                ; User stack address group A
+;SSTACK      := (13 * 16)                ; System stack address group C B
+;USTACK      := (11 * 16)                ; User stack address group A
 ;//////////////////////// per usare emulatore///////////////////
 
 
@@ -133,18 +133,24 @@ CSN             = 01000000b
 O2              = 10000000b
 
 ;** P1X EQUATES ( P7X EMULATED / SHIFTED LEFT 2 )
-ENABLE          = 00000100b ;(00000001b)
-PLAYLN          = 00001000b ;(00000010b)
-RECN            = 00010000b ;(00000100b)
-RECLEDN         = 00100000b ;(00001000b)
-PD118           = 01000000b ;(00010000b)
-PD119           = 10000000b ;(00100000b)
+ENABLE          = 00000001b
+PLAYLN          = 00000010b
+RECN            = 00000100b
+RECLEDN         = 00001000b
+PD118           = 00010000b
+PD119           = 00100000b
 
 ;** P2X EQUATES ( P2X EMULATED )
 BACKLIGHT       = 00000001b
-SDI             = 00000010b
+;////////////////////// per usare emulatore ////////////////
+;SDI             = 00000010b
+;SCK             = 00000100b
+;SDO             = 00001000b
+;//////////////////////////////////////////////////////////
+SDO             = 00000010b
 SCK             = 00000100b
-SDO             = 00001000b
+SDI             = 00001000b
+
 DTMFCP          = 00010000b
 LED1            = 00100000b
 LED2            = 01000000b
@@ -410,7 +416,8 @@ st9$entry_GO::                                  ;
    ld      moder,#(sspm | uspm | div2m)    ; Set USP,SSP in int reg - Ck/2
    ld      usplr,#(USTACK)                 ; Init User stack pointer
    ld      ssplr,#(SSTACK)                 ; Init System stack pointer
-   ld      cicr,#(gcenm | iamm | cplm)     ; CPL=7,enable counter,nested 
+   ld      cicr,#(gcenm | iamm | cplm)     ; CPL=7,enable counter,nested
+
    and     flagr,#03h                      ; Clr flag register
 
    srp     #(15*2)                         ; Set bank register F
@@ -419,21 +426,24 @@ st9$entry_GO::                                  ;
 ;**************** I/O port configuration
 ;***************************************
    spp     #P2C_PG                         ; Port 2 page
-   ld      p2c2r,#11011110b                ;\
-   ld      p2c1r,#01111100b                ; | Set port 2
-   ld      p2c0r,#11011111b                ;/
-   ;emulator board  ^     ^
+;   ld      p2c2r,#11011110b                ;\
+;   ld      p2c1r,#01111100b                ; | Set port 2
+;   ld      p2c0r,#11011111b                ;/
+;   ;emulator board  ^     ^
+   ld      p2c2r,#00011110b                ;\
+   ld      p2c1r,#11111101b                ; | Set port 2
+   ld      p2c0r,#10011110b                ;/
 	;***********************
    spp     #P3C_PG                         ; Port 3 page
    ld      p3c2r,#11111111b                ;\ 
    ld      p3c1r,#00000000b                ; | Set port 3
    ld      p3c0r,#11111111b                ;/
    ;***********************
-   spp     #P4C_PG                         ; Port 4 page
-	ld      p4c2r,#00000000b                ;\ 
-	ld      p4c1r,#11110000b                ; | Set port 4
-	ld      p4c0r,#00000000b                ;/
-   ld      P4DR ,#00000000b                ;
+   spp     #P0C_PG                         ; Port 0 page
+   ld      p0c2r,#00000000b                ;\ 
+   ld      p0c1r,#11110000b                ; | Set port 0
+   ld      p0c0r,#00000000b                ;/
+   ld      P0DR ,#00000000b                ;
 	;***********************
    spp     #P5C_PG                         ; Port 5 page
    ld      p5c2r,#00000000b                ;\
@@ -441,11 +451,11 @@ st9$entry_GO::                                  ;
    ld      p5c0r,#00001000b                ;/
    ld      P5DR ,#00000000b                ;
 	;***********************
-   spp     #P7C_PG                         ; Port 7 page
-	ld      p7c2r,#00100001b                ;\
-	ld      p7c1r,#11011110b                ; | Set port 7
-	ld      p7c0r,#00100011b                ;/
-   ld      P7DR ,#00111111b                ;
+   spp     #P1C_PG                         ; Port 1 page
+   ld      p1c2r,#00001000b                ;\
+   ld      p1c1r,#00110111b                ; | Set port 1
+   ld      p1c0r,#00001000b                ;/
+   ld      P1DR ,#00110111b                ;
    ;***********************
 
 
@@ -454,12 +464,13 @@ st9$entry_GO::                                  ;
 ;***************************************
    spp     #EXINT_PG                       ; External interrupts page  
    ld      eimr,#00000001b                 ; Unmask interrupts
-   ld      eitr,#10001101b                 ; Set int triggers
+   ld      eitr,#00001101b                 ; Set int triggers
    ld      eivr,#01010100b                 ; Set int_vect=5X / NMI
-   ld      eiplr,#00101101b                ; Interrups priority (D-A-BC)
-;  clr     nicr                            ; NMI TLI disabled   
+;   ld      eiplr,#00101101b                ; Interrups priority (D-A-C-B)
+   ld      eiplr,#11100001b                ; Interrups priority (B-A-C-D)
+   clr     nicr                            ; NMI TLI disabled   
 ;////////////////////// per usare emulatore ////////////////
-   ld      nicr,#tlnmm                     ; NMI TLI enabled
+;   ld      nicr,#tlnmm                     ; NMI TLI enabled
 ;///////////////////////////////////////////////////////////
 	ld      wcr,#01000000b                  ; Disable WatchDog
    clr     eipr                            ; Clear ext pending int.
@@ -520,8 +531,19 @@ init::
 	spp     #0                              ; Set Page 0
 
 	call    display_init
+
+   led1    off
+   sleep   #1000
+
 	call    _8880_init
+
+   led2    off
+   sleep   #1000
+
    call    _1420_init
+
+   sleep   #1000
+   backled off
 
    clr     EIPR
 
@@ -583,6 +605,7 @@ idle::
    remote_ei
    _8880_di
 
+   backled off
    relay1  off
    relay2  off
    
@@ -622,7 +645,7 @@ main::
 
 allarme::
    remote_di
-   and     EIMR,#~11110000b
+   and     EIMR,#~11111100b
 
    print   line1, #message_alarm
 ;   sleep   #1000
@@ -737,6 +760,7 @@ outgoing::
 
 
 progr::
+   backled on
    _8880_ei
    remote_di
 
@@ -1301,7 +1325,28 @@ _B0_int::
 ;******** external or Software interrupt
 ;***************************************
 _B1_int::
-   iret
+	push    PPR                             ; Save PPR
+	pushw   RPP                             ; Save RPP
+   srp     #(3*2)                          ; Switch context
+   spp     #0
+   and     EIPR,#~ipb1m                    ; clear pending bit
+   delay   #30
+   ifbit P2DR,#REMOTE                      ; Is here a level 1
+      delay   #100
+      ifbit P2DR,#REMOTE                   ; after 200 usec
+ ;       and     EIMR,#~00001001b           ; Disable other interrupts
+;        delay   #470
+;        spp     #T0D_PG                    ; 
+;        or      T_FLAGR,#(cp0 | ouf)       ; Trigger CP0 and OUF
+;        or      T_TCR,#cen                 ; Start the timer
+ ;       spp     #0
+        call    _frame_sample
+ ;       or      EIMR,#00001001b            ; Re-enable other interrupts
+      }
+   }
+	popw    RPP                             ; Restore context    
+	pop     PPR
+	iret                                    
 
 _C0_int::
    iret
@@ -1312,30 +1357,10 @@ _C1_int::
 _D0_int::
    iret
 
-
+;////////////////////// per usare emulatore ////////////////
 _D1_int::
-	push    PPR                             ; Save PPR
-	pushw   RPP                             ; Save RPP
-   srp     #(3*2)                          ; Switch context
-   spp     #0
-   and     EIPR,#~ipd1m                    ; clear pending bit
-   delay   #30
-   ifbit P2DR,#REMOTE                      ; Is here a level 1
-      delay   #100
-      ifbit P2DR,#REMOTE                   ; after 200 usec
- ;       and     EIMR,#~10000001b           ; Disable other interrupts
-;        delay   #470
-;        spp     #T0D_PG                    ; 
-;        or      T_FLAGR,#(cp0 | ouf)       ; Trigger CP0 and OUF
-;        or      T_TCR,#cen                 ; Start the timer
- ;       spp     #0
-        call    _frame_sample
- ;       or      EIMR,#10000001b            ; Re-enable other interrupts
-      }
-   }
-	popw    RPP                             ; Restore context    
-	pop     PPR
-	iret                                    
+   iret
+;///////////////////////////////////////////////////////////
 
 
 ;**************************************************************************
@@ -1347,7 +1372,7 @@ _D1_int::
 ;************************** init display
 ;***************************************
 display_init::
-	ld      P4DR,#01001111b                 ; scrittura istruzioni
+   ld      P0DR,#01001111b                 ; scrittura istruzioni
 	;***********************    
 	ld      r0,#00110000b                   ;\
 	call    _display_nibble_wr              ; |
@@ -1389,7 +1414,7 @@ display_init::
 
 display_return::
 	call    _display_ready
-   ld      P4DR,#01001111b                   ; set_dis_inst_wr_mode
+   ld      P0DR,#01001111b                   ; set_dis_inst_wr_mode
    ld      r0,#00000010b                     ; return home
 	call    _display_write
 	ret
@@ -1410,7 +1435,7 @@ display_update:
 	pushuw  rr10
 	;***********************
 	call    _display_ready
-   ld      P4DR,#01001111b                   ; scrittura istruzioni
+   ld      P0DR,#01001111b                   ; scrittura istruzioni
    ld      r0,#10000000b                     ; first line (set address)
 	call    _display_write
 	;***********************
@@ -1418,20 +1443,20 @@ display_update:
 	ld      r10,#16
    loop [r10] {                              ; loop 16 times (a line)
 		call    _display_ready
-      ld      P4DR,#01101111b                ; scrittura dati
+      ld      P0DR,#01101111b                ; scrittura dati
 		ld      r0,(rr8)+
 		call    _display_write
 	}
 	;***********************
 	call    _display_ready
-   ld      P4DR,#01001111b                   ; scrittura istruzioni
+   ld      P0DR,#01001111b                   ; scrittura istruzioni
    ld      r0,#11000000b                     ; second line (set address)
 	call    _display_write
 	;***********************
 	ld      r10,#16
    loop [r10] {                              ; loop 16 times (a line)
 		call    _display_ready
-      ld      P4DR,#01101111b                ; scrittura dati
+      ld      P0DR,#01101111b                ; scrittura dati
 		ld      r0,(rr8)+
 		call    _display_write
 	}
@@ -1451,16 +1476,16 @@ _display_nibble_wr::
 	pushu   PPR
 	spp     #P7D_PG
 	;***********************
-   or      P7DR,#ENABLE            ; set E
+   or      P1DR,#ENABLE            ; set E
 	;*********************** 
 	swap    r0
 	and     r0,#00001111b
-	ld      r2,P4DR
+   ld      r2,P0DR
 	and     r2,#11110000b             
 	or      r0,r2
-	ld      P4DR,r0                 ; write
+   ld      P0DR,r0                 ; write
 	;***********************
-   and     P7DR,#~ENABLE           ; reset E
+   and     P1DR,#~ENABLE           ; reset E
 	;***********************
 	popu    PPR                 
 	ret
@@ -1472,12 +1497,12 @@ _display_nibble_rd::
 	pushu   PPR
 	spp     #P7D_PG                 
 	;***********************
-   or      P7DR,#ENABLE            ; set E
+   or      P1DR,#ENABLE            ; set E
 	nop
-   and     P7DR,#~ENABLE           ; reset E
+   and     P1DR,#~ENABLE           ; reset E
 	;***********************
 	nop
-	ld      r0,P4DR                 ; read
+   ld      r0,P0DR                 ; read
 	and     r0,#00001111b
 	swap    r0
 	;*********************** 
@@ -1512,10 +1537,10 @@ _display_read::
 ;******************** is display ready ?
 ;***************************************
 _display_ready:: 
-	pushu   P4DR
+   pushu   P0DR
 	spp     #P7D_PG                 
 	;***********************
-	ld      P4DR,#01011111b         ; modo instruzioni & read
+   ld      P0DR,#01011111b         ; modo instruzioni & read
 	;***********************
    ld     r2,#0FFh
    loop [r2] {
@@ -1525,7 +1550,7 @@ _display_ready::
 	   }
 	}
 	;***********************
-	popu    P4DR
+   popu    P0DR
 	ret
 
 
@@ -1601,19 +1626,19 @@ _8880_init::
 ;*        bit 7,,4 must be 0
 ;***************************************
 _8880_data_wr::
-	pushu   P4DR
+   pushu   P0DR
 	ld      r1,#00000000b           ; assert data write end CS
-	ld      P4DR,r1
+   ld      P0DR,r1
 	or      r1,#10000000b
-	ld      P4DR,r1
+   ld      P0DR,r1
 	or      r0,r1
-	ld      P4DR,r0
+   ld      P0DR,r0
 	nop
 	nop
 	and     r0,#01111111b
-	ld      P4DR,r0
+   ld      P0DR,r0
 	nop
-	popu    P4DR
+   popu    P0DR
 	ret
 
 
@@ -1625,17 +1650,17 @@ _8880_data_wr::
 ;*        bit 7,,4 must be 0
 ;***************************************
 _8880_ctrl_wr::
-	pushu   P4DR
+   pushu   P0DR
 	ld      r1,#00100000b           ; assert data write end CS
-	ld      P4DR,r1
+   ld      P0DR,r1
 	or      r1,#10000000b
-	ld      P4DR,r1
+   ld      P0DR,r1
 	or      r0,r1
-	ld      P4DR,r0
+   ld      P0DR,r0
 	and     r0,#01111111b
-	ld      P4DR,r0
+   ld      P0DR,r0
 	delay   #20
-	popu    P4DR
+   popu    P0DR
 	ret
 
 
@@ -1648,18 +1673,18 @@ _8880_ctrl_wr::
 ;*
 ;***************************************
 _8880_data_rd::
-	pushu   P4DR
+   pushu   P0DR
 	ld      r1,#00011111b           ; assert data read CS
-	ld      P4DR,r1
+   ld      P0DR,r1
 	or      r1,#10000000b
-	ld      P4DR,r1
-	ld      r3,P4DR
+   ld      P0DR,r1
+   ld      r3,P0DR
 	ld      r0,#01111111b
-	ld      P4DR,r0
+   ld      P0DR,r0
 	ld      r0,r3
 	and     r0,#00001111b        
 	delay   #20
-	popu    P4DR
+   popu    P0DR
 	ret
 
 
@@ -1672,16 +1697,16 @@ _8880_data_rd::
 ;*
 ;***************************************
 _8880_ctrl_rd::
-	pushu   P4DR
+   pushu   P0DR
 	ld      r1,#00111111b           ; assert control write CS
-	ld      P4DR,r1
+   ld      P0DR,r1
 	or      r1,#10000000b
-	ld      P4DR,r1
-	ld      r3,P4DR
+   ld      P0DR,r1
+   ld      r3,P0DR
 	ld      r0,#01111111b
-	ld      P4DR,r0
+   ld      P0DR,r0
 	ld      r0,r3           
-	popu    P4DR
+   popu    P0DR
 	ret
 
 
@@ -1689,12 +1714,12 @@ _8880_ctrl_rd::
 ;********** put 8880 in POWER DOWN
 ;****************************************
 _8880_pwd::
-	push    P4DR
-	ld      r1,P4DR
+   push    P0DR
+   ld      r1,P0DR
    and     r1,#~(O2)               ; pongo O2  a 0 
    or      r1,#CSN                 ; pongo CS* a 1 
-	ld      P4DR,r1
-	pop     P4DR
+   ld      P0DR,r1
+   pop     P0DR
 	ret
 
 
@@ -1709,7 +1734,7 @@ _8880_pwd::
 vivavoce_on::
    pushu   PPR
 	spp     #P7D_PG
-   or      P7DR,#(PD118 | PD119)     ; attiva MC34118 e MC34119
+   or      P1DR,#(PD118 | PD119)     ; attiva MC34118 e MC34119
    popu    PPR
    ret
 
@@ -1720,7 +1745,7 @@ vivavoce_on::
 vivavoce_off::
    pushu   PPR
 	spp     #P7D_PG
-   and     P7DR,#~(PD118 | PD119)    ; disattiva MC34118 e MC34119
+   and     P1DR,#~(PD118 | PD119)    ; disattiva MC34118 e MC34119
    popu    PPR
    ret
 
@@ -1784,7 +1809,7 @@ _1420_reset::
 _1420_record::
    pushu   PPR
    spp         #P7D_PG
-   and         P7DR,#~RECN
+   and         P1DR,#~RECN
    sleep       #100
    popu    PPR
    ret
@@ -1795,7 +1820,7 @@ _1420_record::
 _1420_play::
    pushu   PPR
    spp         #P7D_PG
-   and         P7DR,#~PLAYLN
+   and         P1DR,#~PLAYLN
    sleep       #100
    popu    PPR
    ret
@@ -1806,7 +1831,7 @@ _1420_play::
 _1420_stop::
    pushu   PPR
    spp         #P7D_PG
-   or          P7DR,#(RECN | PLAYLN)
+   or          P1DR,#(RECN | PLAYLN)
    sleep       #100
    popu    PPR
    ret
@@ -2149,20 +2174,12 @@ date::
    call    rtc_read
    di
    blank   line2
-   ldw     rr6,#line2+13
+   ldw     rr6,#line2+12
    ldw     rr4,#rtc_buffer+4
    ld      r8,#47
-   ld      r3,#4
+   ld      r3,#3
    loop [r3]
    {
-      if [r3 == #2]
-      {
-         ldw   rr4,#rtc_buffer+5
-      }
-      if [r3 == #3]
-      {
-         ldw   rr4,#rtc_buffer+8
-      }
       ld    r0,(rr4)
       incw  rr4
       byte2bcd r0,r2,r1
@@ -2508,17 +2525,8 @@ date_enter::
    call    rtc_read
    ldw     rr4,#rtc_buffer+4
    ldw     rr10,#date_buffer+6
-   ld      r3,#4
+   ld      r3,#3
    loop [r3] {
-      if [r3 == #1]
-      {
-         ldw     rr10,#date_buffer+6
-         incw    rr4 
-      }
-      if [r3 == #3]
-      {
-         ldw     rr10,#date_buffer+4
-      }
       ld      r0,(rr4)
       incw    rr4
       byte2bcd r0,r2,r1
@@ -2527,38 +2535,25 @@ date_enter::
    }
    ldw     rr6,#line2
    ldw     rr10,#date_buffer
-   ld      r8,#3
-   addw    rr6,#3
+   ld      r8,#4
+   addw    rr6,#4
    ld      r9,#95
    ld      (rr6),r9
-   .input  3,12,48
-      .maxval   3,3
-      .minval   4,1,0
-      .maxval   4,1,3
-      .maxval   6,1
-      .minval   7,1,0
-      .maxval   7,2,1
-      .maxval   9,2
-      .maxval  10,0,2
-      .minval   9,1
-      .minval  10,9,1
-      .break    5,47
-      .break    8,47
+   .input  4,11,48
+      .maxval   4,3
+      .minval   5,1,0
+      .maxval   5,1,3
+      .maxval   7,1
+      .minval   8,1,0
+      .maxval   8,2,1
+      .break    6,47
+      .break    9,47
    .endinput        
    call    rtc_read
    ldw     rr4,#rtc_buffer+4
-   ldw     rr10,#date_buffer+8
-   ld      r3,#4
+   ldw     rr10,#date_buffer+6
+   ld      r3,#3
    loop [r3] {
-      if [r3 == #1]
-      {
-         ldw     rr10,#date_buffer+6
-         incw    rr4 
-      }
-      if [r3 == #3]
-      {
-         ldw     rr10,#date_buffer+4
-      }
       decw    rr10
       ld      r1,(rr10)
       decw    rr10
@@ -2803,7 +2798,7 @@ msghiz::                .ascii  " ALTA IMPEDENZA "
 ;************************* Fine ROM - Checksum ****************************
 ;**************************************************************************
 
-;                        .org    (ROMSIZE - 8)
+                        .org    (ROMSIZE - 8)
 pattern::               .byte   055h,0AAh
 serial::                .byte   1,0,0,2
 checksum::              .byte   0,0
@@ -2814,10 +2809,9 @@ checksum::              .byte   0,0
 ;**************************************************************************
     
                         .data
-;                        .org    0
-
+                        .org    0
 ;//////////////////////// per usare emulatore /////////////////
-                        .org 200h
+;                        .org 200h
 ;//////////////////////////////////////////////////////////////
 
 frame_buffer::          .blkb   2               ; format: 0xxxxxx00xxxxxx0
