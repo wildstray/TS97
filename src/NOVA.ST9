@@ -9,14 +9,16 @@
 ;*              * ST9 configuration code                                  *
 ;*              * MAIN procedure                                          *
 ;*              * RTC procedure                                           *
+;*              * HW related procedure                                    *
 ;*              * Interrupt service procedures                            *
-;*              * Subroutine                                              *
+;*              * Subroutines                                             *
+;*              * Static data define                                      *
 ;*              * Data section define                                     *
 ;*                                                                        *
-;* VERSION                : 0.1.0                                         *
+;* VERSION                : 0.5.0                                         *
 ;*                                                                        *
 ;*                                                                        *
-;* FILE ORIGINAL DATE     : 09/04/97                                      *
+;* LAST REVISION          : 18/06/97                                      *
 ;*                                                                        *
 ;* AUTHOR                 : Andrea Tuccia                                 *
 ;*                                                                        *
@@ -42,13 +44,13 @@
 ;*
 ;***************************************
 .nlist             
-.include    "c:\st9\include\system.inc"    ; System register
-.include    "c:\st9\include\page_0.inc"    ; Page 0 register
-.include    "c:\st9\include\io_port.inc"   ; I/O port register
-.include    "c:\st9\include\mftimer.inc"   ; MF Timer register
-.include    "c:\st9\include\ad_c.inc"      ; A/D converter register
-.include    "c:\st9\include\sci.inc"       ; SCI register
-.include    "c:\st9\include\bitmacro.inc"  ; BIT macros
+.include    "\st9\include\system.inc"    ; System register
+.include    "\st9\include\page_0.inc"    ; Page 0 register
+.include    "\st9\include\io_port.inc"   ; I/O port register
+.include    "\st9\include\mftimer.inc"   ; MF Timer register
+.include    "\st9\include\ad_c.inc"      ; A/D converter register
+.include    "\st9\include\sci.inc"       ; SCI register
+.include    "\st9\include\bitmacro.inc"  ; BIT macros
 .list
 .include        "nova.mac"
 
@@ -75,6 +77,10 @@ EXT_INT_VEC     = 050h                  ; External interrupt base vector
 T0_UNDERFLOW    = 0C0h                  ; T0 int vector
 START_CODE      = 100h                  ; Start of C startup code
 
+REMOTE_TEST     = 0101010001010000b     ; Test pattern for remote
+
+on              = 1
+off             = 0
 
 ;***************************************
 ;********************* I/O ports equates
@@ -100,6 +106,14 @@ LED1            = 00100000b
 LED2            = 01000000b
 REMOTE          = 10000000b
 
+;** P3X EQUATES ( P3X EMULATED )
+HOOK            = 00000001b
+ALARM1          = 00000010b
+ALARM2          = 00000100b
+ALARM3          = 00001000b
+PROG            = 00010000b
+RESET           = 00100000b
+
 ;** P5X EQUATES ( P5X EMULATED )
 MUTE            = 00000001b
 REL1            = 00000010b
@@ -112,17 +126,10 @@ VOICE_ADDR      = 00100000b
 DTMFAVLB        = 00000100b
 DTMFINOUT       = 00000101b
 DTMFTONE        = 00000110b
+TONEHIZ         = 0
 TONEDIAL        = 1
 TONEPBX         = 2
 TONEBUSY        = 3
-TONEMISDIAL     = 4
-
-;EXTERNAL ALARMS
-ALARM1          = 10000000b
-ALARM2          = 01000000b
-ALARM3          = 00100000b
-ALARM4          = 00010000b
-
 
 
 ;**************************************************************************
@@ -160,11 +167,14 @@ ALARM4          = 00010000b
 DIAG_PG  = 9
 DISP_C  := R159                         ; 
 DISP_F  := R158                         ; 
-DTMF_D  := RR156                        ; 
-ALARM   := RR154                        ; 
-;        := RR152                        ; 
-;        := RR150                        ; 
-;        := RR148                        ; 
+DTMF_D  := RR156                        ;
+TASTI   := R155                         ;  
+ALARM   := R154                         ; 
+RING_C  := R153                         ;
+TONE_1  := R151                         ; 
+TONE_0  := R150                         ;
+DIGIT   := R149                         ;
+PHONE   := R148                         ; 
 REM_OK  := R147                         ;
 INT_TR  := R146                         ;
 REM_C   := R145                         ; 
@@ -224,7 +234,7 @@ REM_F   := R144                         ;
 
 
 ;**************
-;******* Bank 5             
+;******* Bank 5                         ; I2C slave data
 ;**************
 ;       :=RR94
 ;       :=R93
@@ -240,18 +250,23 @@ REM_F   := R144                         ;
 
 
 ;**************
-;******* Bank 4             
+;******* Bank 4                         ; I2C bus manager
 ;**************
-;       :=R79
-;       :=R78
-;       :=RR76
-;       :=RR74
-;       :=RR72
-;       :=RR70
-;       :=RR68
-;       :=RR66
-;       :=RR64
-
+COUNTER     =  R79
+TOT_LENGHT  =  R78
+SLAVE_W     =  R73                      ; Write slave control byte
+SLAVE_R     =  R72                      ; Read slave control byte
+SPI_BUFF    =  R71
+LENGHT      =  R70                      ; Number of bytes to be transfert.
+lenght      =  r6
+SPI_STAT    =  R69
+I2C_STAT    =  R68
+I2C_OP      =  R67
+READ_DATA   =  R66                      ; Data witch has been read slave.
+read_data	=	r2
+WRITE_DATA  =  R65                      ; Data to be programmed in the slave.
+write_data  =  r1
+I2C_ADDR    =  R64                      ; Operation address in the slave.
 
 
 ;**************
@@ -296,6 +311,33 @@ REM_F   := R144                         ;
 ;       :=R16
 
 
+;***********************
+; Constant declarations.
+;***********************
+
+e2_slave     == 10100000b           ; EEPROM I2C slave control byte
+rtc_slave    == 11010000b           ; Real Time Clock I2C slave control byte
+
+SDI_MASK =  02h                     ; SDI = bit 1 of port 2
+SCK_MASK =  04h                     ; SCK = bit 2 of port 2
+SDO_MASK =  08h                     ; SDO = bit 3 of port 2
+
+READ         == 1                   ; Read mode
+WRITE        == 2                   ; Write mode
+VERIFY       == 3                   ; Alternate read mode
+
+TRANS_ADDR   == 1                   ; The eeprom address transferred
+TRANS_CTRL   == 2                   ; The control address transferred
+TRANS_DWR    == 3                   ; The data has been transmitted
+TRANS_DRD    == 4                   ; The data has been received
+
+EEP_OK       == 0                   ; Slave is OK.
+LECT_ON      == 1                   ; Slave is reading a byte.
+VERIF_ON     == 2                   ; Slave is reading the current byte.
+ECR_ON       == 3                   ; Slave is programming a byte.
+NO_ACK       == 4                   ; Slave has not acknowledged.
+
+SLAVE_READY  == 80h                 ; Slave is ready for a new operation...
 
 
 
@@ -385,17 +427,19 @@ st9$entry_GO::                                  ;
 ;**************** I/O port configuration
 ;***************************************
    spp     #P2C_PG                         ; Port 2 page
-	ld      p2c2r,#10001111b                ;\ 
-	ld      p2c1r,#01101110b                ; | Set port 2
-	ld      p2c0r,#11011111b                ;/
-   ld      p2dr, #00000000b
+;   ld      p2c2r,#10001111b                ;\ 
+;   ld      p2c1r,#01101110b                ; | Set port 2
+;   ld      p2c0r,#11011111b                ;/
+   ld      p2c2r,#10011111b                ;\ 
+   ld      p2c1r,#01111100b                ; | Set port 2
+   ld      p2c0r,#11011111b                ;/
+;   ld      p2dr, #00000000b
   ;emulator board  ^     ^
 	;***********************
    spp     #P3C_PG                         ; Port 3 page
-	ld      p3c2r,#11111100b                ;\ 
-	ld      p3c1r,#11110011b                ; | Set port 3
+   ld      p3c2r,#11111111b                ;\ 
+   ld      p3c1r,#00000000b                ; | Set port 3
 	ld      p3c0r,#11111111b                ;/
-   ld      p3dr ,#11111111b                ;
    ;***********************
    spp     #P4C_PG                         ; Port 4 page
 	ld      p4c2r,#00000000b                ;\ 
@@ -404,10 +448,10 @@ st9$entry_GO::                                  ;
    ld      p4dr ,#00000000b                ;
 	;***********************
    spp     #P5C_PG                         ; Port 5 page
-	ld      p5c2r,#00001000b                ;\
+   ld      p5c2r,#00001000b                ;\
 	ld      p5c1r,#11110111b                ; | Set port 5
-	ld      p5c0r,#00001000b                ;/ 
-   ld      p5dr ,#00100000b                ;
+   ld      p5c0r,#00000000b                ;/
+   ld      p5dr ,#00000000b                ;
 	;***********************
    spp     #P7C_PG                         ; Port 7 page
 	ld      p7c2r,#00100001b                ;\
@@ -422,7 +466,7 @@ st9$entry_GO::                                  ;
 ;***************************************
    spp     #EXINT_PG                       ; External interrupts page  
    ld      eimr,#00000001b                 ; Unmask interrupts
-   ld      eitr,#10000001b                 ; Set int triggers
+   ld      eitr,#10001001b                 ; Set int triggers
    ld      eivr,#01010100b                 ; Set int_vect=5X / NMI
    ld      eiplr,#01101000b                ; Interrups priority (A-D-BC)
 ;  clr     nicr                            ; NMI TLI disabled   
@@ -486,44 +530,101 @@ st9$entry_GO::                                  ;
 ;************************** TS MAIN PROGRAM *******************************
 ;**************************************************************************
 init::
+
 	srp     #0                              ; Set register bank 0
 	spp     #0                              ; Set Page 0
 
 	call    display_init
 	call    _8880_init
+   clr     EIPR
 
-   ldw     rr0,#frame_buffer            ; loads the frame buffer
-   ldw     (rr0),#0                     ; zero the buffer
-
-	ei
+   ei
 
 open::
 
    print   line1, message_open
    print   line2, message_name
-   sleep   #2000
+   sleep   #1500
 
-   print   line1, message_diag
-   print   line2, message_attenzione
-   sleep   #2000
+   call    display_bufclr
 
+;   jx tony
+;   jx zeppo
+   and     P5DR ,#~00110001b
 
 idle::
+   spp     #0
+   ldw     rr0,#frame_buffer            ; loads the frame buffer
+   ldw     (rr0),#0                     ; zero the buffer
+   ld      ALARM,#0
+   ld      HOOK,#0
+   ld      TASTI,#0
+   or      EIMR,#10000000b
+   relay1  off
+   relay2  off
+
    print   line1, message_ready
    print   line2, message_time
-   jx      idle
 
+main::
+   loop {
+      if [TASTI == #PROG]
+      {
+         jx       progr
+      }
+      if [ALARM > #0]
+      {
+         print    line2, message_altrig
+         jx       allarme
+      }
+      if [PHONE != #0]
+      {
+         jx       hook
+      }
+      ldw    rr0,(frame_buffer)
+      ifw [rr0 == #REMOTE_TEST]
+      {
+         print    line2, message_alrem
+         jx       allarme
+      }
+   }
 
 allarme::
-   print   line1, message_ready
-   print   line1, message_ready
+
+   print   line1, message_alarm
+   sleep   #1000
+   relay1  on
+
+   sleep   #1000
+
+   ldw     rr0,#combtel_buffer
+   ldw     rr2,#numero
+   ld      r4,#32
+   loop [r4] {
+      lddp (rr0)+,(rr2)+
+	}
+   call    combtel_dtmf
    sleep   #2000
+   if [TASTI == #RESET]
+   {
+     jx       annullamento
+   }
 
-alloop::
+   call    reset_message
+   sleep   #100
+   call    play_begin
+   sleep   #5000
+   call    play_end
+   if [TASTI == #RESET]
+   {
+     jx       annullamento
+   }
 
-   jx      alloop
-
-
+   print   line1, message_alarm
+   print   line2, message_ok
+   sleep   #2000
+   jx      idle
+   
 annullamento::
    print   line1, message_alarm
    print   line2, message_break
@@ -531,12 +632,209 @@ annullamento::
    jx      idle
 
 
+hook::
+   print   line1, message_cornetta
+   print   line2, message_alzata
+   sleep   #1000
+   if [PHONE == #0]
+   {
+      print   line2, message_abbassata
+      sleep   #1000
+      jx      idle
+   }
+   jx      hook
 
+
+progr::    
+   print   line1, message_progst
+   print   line2, message_tastibegin
+   relay1  on
+   relay2  on
+
+   ld      r0,#80
+   loop [r0]
+   {
+      sleep   #100
+      if [PHONE == #1]
+      {
+         break
+      }
+   }
+   if [PHONE == #0]
+   {
+      jx      idle
+   }
+   print   line1, message_tastiend1
+   print   line2, message_tastiend2
+   sleep   #1000
+   ld      r2,#0
+   ld      DIGIT,#0
+	ld      r0,#DTMFINOUT
+	call    _8880_ctrl_wr
+
+   loop {
+      ld      r1,DIGIT
+      clr     DIGIT
+      if [r1 == #12]
+      {
+         inc      r2
+         if [r2 > #6]
+         {
+           dec    r2
+         }
+      }
+      if [r1 == #11]
+      {
+         dec      r2
+         if [r2 < #0]
+         {
+           inc    r2
+         }
+      }
+      switch [r2]
+      {
+         case #0:
+            print   line1, menu_oradata
+         case #1:
+            print   line1, menu_messaggi
+         case #3:
+            print   line1, menu_numeri
+         case #4:
+            print   line1, menu_telecomando
+         case #5:
+            print   line1, menu_tempi
+         case #6:
+            print   line1, menu_riservato
+      }
+      print   line2, message_tastipr
+      if [r1 == #10]
+      {
+         call  prog_menu 
+      }
+      if [PHONE == #0]
+      {
+         break
+      }
+      clr     r1
+   }
+   print   line1, message_fineprog1
+   print   line2, message_fineprog2
+   sleep   #1000
+   jx      idle
+
+
+prog_menu::
+   loop {
+      ld      r1,DIGIT
+      clr     DIGIT
+      switch [r2]
+      {
+         case #0:
+            print   line1, sub_oradata1
+            print   line2, sub_oradata2
+         case #1:
+            print   line1, sub_messaggi1
+            print   line2, sub_messaggi2
+         case #3:
+            print   line1, sub_numeri1
+            print   line2, sub_numeri2
+         case #4:
+            print   line1, sub_telecomando1
+            print   line2, sub_telecomando2
+         case #5:
+            print   line1, sub_tempi1
+            print   line2, sub_tempi2
+         case #6:
+            print   line1, sub_riservato1
+            print   line2, sub_riservato2
+      }
+      if [r1 == #11]
+      {
+         break
+      }
+      if [r1 == #10]
+      {
+         switch [r2]
+         {
+            case #1:
+               call   prog_messaggi
+;            case #3:
+;               call   prog_numeri
+         }
+      }
+      clr     r1
+      if [PHONE == #0]
+      {
+         break
+      }
+   }
+   ret
+
+prog_messaggi::
+;   loop {
+;      ld      r1,DIGIT
+;      clr     DIGIT
+;      ifbit P3DR,#PROG
+;         while [] {
+;
+;         }
+;       if [DIGIT == #10]
+;       {
+         print   line1, messaggi_begin1
+         print   line2, messaggi_begin2
+
+         call  reset_message
+         sleep #100
+         call  rec_begin
+         sleep #5000
+         call  rec_end
+
+         print   line1, messaggi_end1
+         print   line2, messaggi_end2
+         sleep   #1000
+
+;         break
+;      }
+;      clr     r1
+;      if [r1 == #11]
+;      {
+;         break
+;      }
+;      if [PHONE == #0]
+;      {
+;         break
+;      }
+;   }
+   ret
+
+prog_numeri::
+   loop {
+
+      print   line1, numeri_begin1
+      print   line2, numeri_begin2
+
+
+      print   line1, messaggi_end1
+      print   line2, messaggi_end2
+      sleep   #1000
+   }
+   ret
+
+
+
+
+
+;*************************************************************************
+;*************************************************************************
+;*************************************************************************
+;*************************************************************************
+
+zeppo::
 	;call     att_viva_voce
 
 ;jx xyz
-	set_bit P5DR,REL1       ;on hook
-	set_bit P5DR,REL2       
+   set_bit P5DR,REL1       ;on hook
+   set_bit P5DR,REL2       
    delay   #60000
 	delay   #60000
 	
@@ -545,32 +843,32 @@ eee::
 ;  or      EIMR,#(ALARM1 | ALARM2 | ALARM3 | ALARM4)
 ;  clr     eipr  
 	
-	jx      rem
+;   jx      rem
 
 xyz:: 
 ;       attendo ring per prendere linea
-	loop {
-	   ifnobit P5DR,#RING    ;ring se bit == 0
-	      set_bit P5DR,REL1       ;on hook
-	      break
-	   }
-	}
+;   loop {
+;      ifnobit P5DR,#RING    ;ring se bit == 0
+;         set_bit P5DR,REL1       ;on hook
+;         break
+;      }
+;   }
 
 xxx1::
 ;////////////////////////////////////////////////////////////////////////
 
 
 
-	or      P5DR,#8
-	ldw     rr0,#0fffh
-	loopw [rr0] {
-	   delay   #60
-	}
+;   or      P5DR,#8
+;   ldw     rr0,#0fffh
+;   loopw [rr0] {
+;      delay   #60
+;   }
 
 
 ;  ld      r0,#DTMFTONE
-	ld      r0,#DTMFINOUT
-	call    _8880_ctrl_wr
+;   ld      r0,#DTMFINOUT
+;   call    _8880_ctrl_wr
 
 
 cazzillo::
@@ -644,11 +942,15 @@ zzz::
 ;  }
 	jx      pino
 
-       
+fezza::       
 loop {
 	delay  #30000
+	ld      r0,#1111b
+	call    _8880_ctrl_wr
+	ld      r0,#0000b
+	call    _8880_ctrl_wr
 
-	ld      r0,#7    ;**** cifra 2
+   ld      r0,#1    ;**** cifra 2
 	call    _8880_data_wr        
 	;******
 	do {
@@ -677,13 +979,16 @@ pino::
 	ldw     rr2,#malvenuto
 	ld      r4,#16
 	loop [r4] {
-	   lddd (rr6)+,(rr2)+
+      lddp (rr6)+,(rr2)+
 	}
 	xor     r8,r8
 
 
 peppo::        
-	
+
+   and     P5DR ,#~00000001b
+   and     P5DR ,#~00110000b
+
 	
 	loop {
 	   delay   #8000
@@ -710,11 +1015,15 @@ peppo::
 	      case #11:
             ld      r4,#00101010b
             ld      (rr6)+,r4
-            call    rec_message
+            call    rec_begin
+            sleep   #5000
+            call    rec_end
 	      case #12:
             ld      r4,#00100011b
             ld      (rr6)+,r4
-            call    play_message
+            call    play_begin
+            sleep   #5000
+            call    play_end
 	      default:
             ld      r4,#48
             add     r4,r2
@@ -735,7 +1044,7 @@ stop::
 
 rem::
    spp     #0
-   call    T0_remote
+;   call    T0_remote
 
    and     P5DR,#~1
    or      EIMR,#10000000b
@@ -762,6 +1071,40 @@ rem::
 	}
 
 
+tony::
+   call    display_bufclr
+
+   spp     #0
+
+   ld      r0,#DTMFTONE
+   call    _8880_ctrl_wr
+
+   relay1  off
+   print   line1, msgtony
+   print   line2, message_attendere
+   loop {
+      call    _tone_sample
+      if [r0 == #TONEHIZ] {
+         print   line2,msghiz
+      }
+      if [r0 == #TONEDIAL] {
+         print   line2,msglibero
+      }
+      if [r0 == #TONEBUSY] {
+         print   line2,msgoccupato
+         relay2  off
+         relay1  off
+      }
+      if [r0 == #TONEPBX] {
+         print   line2,msgpbx
+         sleep   #1000
+         ld      (combtel_buffer),#10
+         ld      (combtel_buffer+1),#0
+         call    combtel_dtmf
+      }
+   }
+
+
 user_main::
 
 	nop
@@ -778,6 +1121,21 @@ user_main::
 ;************************ T0 interrupt 0
 ;***************************************
 _T0_int_0::
+	pushu	PPR
+   ;***********************                
+   spp     #T0D_PG                         ; Enable Timer0 page
+   and     T_FLAGR,#~(ouf | cp0 | cp1)     ; Clear Overflow/Underflow/Capture
+	spp     #0
+   ;***********************
+   or    I2C_STAT,#SLAVE_READY           ; Write sequence is finished.
+   popu  PPR
+	iret                                    
+
+
+;***************************************
+;************************ T0 interrupt 1
+;***************************************
+_T0_int_1::
 	pushw   RPP                             ; Save RPP
 	push    PPR                             ; Save PPR
    srp     #(3*2)                          ; Switch context
@@ -814,12 +1172,6 @@ _T0_int_0::
 	popw    RPP                             ; Restore context    
 	iret                                    
 
-
-;***************************************
-;************************ T0 interrupt 1
-;***************************************
-_T0_int_1::
-   iret
 
 ;***************************************
 ;************************ T0 interrupt 2
@@ -890,47 +1242,194 @@ _SCI_it_receive::
 
 
 ;***************************************
-;******************** WD timer int 50ms
+;********************* WD timer int 50ms
 ;***************************************
 _A0_int::
-   push    PPR                             ; Save PPR
-	pushw   RPP                             ; Save RPP
+   pushu   PPR                             ; Save PPR
+   pushuw  RPP                             ; Save RPP
    srp     #(2*2)                          ; Switch context
    spp     #0
+   clr     EIPR                            ; clear pending interrupts
    pushu   EIMR
-   clr     EIMR                            ; clear pending interrupts
-   clr     EIPR                            ; disable all external
+   clr     EIMR                            ; disable all interrupts
    ;***********************
-   call    display_update
+   call    display_update                  ; resfresh display
 	;***********************
+   ifbit   P3DR,#ALARM1                    ; poll external alarms
+      ld      ALARM,#ALARM1
+   }
+   ifbit   P3DR,#ALARM2
+      ld      ALARM,#ALARM2
+   }
+   ifbit   P3DR,#ALARM3
+      ld      ALARM,#ALARM3
+   }
+   ifbit   P3DR,#HOOK                      ; poll phone hook status
+      ld      PHONE,#1
+   } else {
+      ld      PHONE,#0
+   }
+   ifbit   P3DR,#PROG                      ; poll user switches
+      ld      TASTI,#PROG
+   }
+   ifbit   P3DR,#RESET
+      ld      TASTI,#RESET
+;      or      EIPR,#00010000b             ;
+;      di
+;      jx      init
+   }
+   ifbit   P5DR,#RING                      ; poll ring detector
+      ld      RING_C,#1
+   }
+   ;***********************
+   if [TONE_0 < #36]                       ; poll line-tone input to
+   {                                       ; calculate a silence/tone ratio
+      ld      r0,#200                    
+      loop [r0] {
+         ld      r1,P2DR
+         and     r1,#DTMFCP
+         if [r1 == #DTMFCP]
+         {
+            inc     TONE_1
+            break
+         }
+         nop
+         nop
+      }
+      inc     TONE_0
+   }
+   ;***********************
+   call    _8880_ctrl_rd                   ; see if valid dtmf has been
+   ifbit   r0,#0100b                       ; received from the MT8880
+      delay   #8000
+      call    _8880_data_rd
+      ld      DIGIT,r0
+	}
+   ;***********************
    spp     #0
-   clr     EIPR
-   popu    EIMR                            ; re-enable all external
-	popw    RPP                             ; Restore context
-   pop     PPR
+   clr     EIPR                            ; WD generate spurious
+   popu    EIMR                            ; re-enable all interrupts
+   popuw   RPP                             ; Restore context
+   popu    PPR
 	iret
 
 ;***************************************
 ;**************************** MT8880 IRQ
 ;***************************************
 _A1_int::
-    iret
+   iret
+   pushu   PPR
+   pushuw  RPP
+   srp     #(3*2)
+   spp     #0
+   clr     EIPR
+
+   delay   #8000
+   call    _8880_ctrl_rd
+   ifbit   r0,#0101b
+      delay   #8000
+      call    _8880_data_rd
+      ld      DIGIT,r0
+	}
+   delay   #8000
+   ld      r0,#DTMFINOUT
+	call    _8880_ctrl_wr
+
+   popuw   RPP
+   popu    PPR
+	iret
+
 
 ;***************************************
 ;************************* SPI Interrupt
 ;***************************************
 _B0_int::
-	 iret
+   pushu   PPR
+   pushuw  RPP
+   srp     #4
+   spp     #0
+   if [SPI_STAT == #TRANS_DRD]           
+   {
+      ld    read_data,SPIDR         
+      ld    i2c_buffer(lenght),read_data 
+      dec   lenght           
+      if    [SETZ]
+      {
+         call  GEN_STOP   
+         ld    I2C_STAT,#SLAVE_READY 
+		} else {
+         call  GEN_ACK 
+         ld    SPI_STAT,#TRANS_DRD
+         spp   #0
+         ld    SPI_BUFF,#0FFH 
+      } 
+	} else {
+      call  TEST_ACK          
+      if [I2C_STAT == #NO_ACK]
+      { 
+         call  GEN_STOP      
+         or    I2C_STAT,#SLAVE_READY   
+		} else {
+         switch [SPI_STAT] {
+         case  #TRANS_CTRL:
+            if [I2C_STAT == #VERIF_ON]
+            {
+               ld    SPI_STAT,#TRANS_DRD
+               spp   #0
+               ld    SPI_BUFF,#0FFH 
+				} else {
+               ld    SPI_STAT,#TRANS_ADDR
+					spp	#0
+               ld    SPI_BUFF,I2C_ADDR
+            }
+         case  #TRANS_ADDR:
+            if [I2C_OP == #READ]
+            {
+               call  GEN_START   
+               ld    SPI_STAT,#TRANS_CTRL
+               ld    SPI_BUFF,#SLAVE_R
+               ld    I2C_STAT,#VERIF_ON  
+				} else {
+					spp	#0
+               ld    SPI_STAT,#TRANS_DWR
+               ld    write_data,i2c_buffer(lenght)
+               ld    SPI_BUFF,write_data
+            } 
+         case  #TRANS_DWR:
+				spp	#0
+            dec   lenght  
+            if    [CLZ]
+            {
+               ld    write_data,i2c_buffer(lenght)
+               ld    SPI_BUFF,write_data
+            } else {  
+               call  T0_I2C
+               call  GEN_STOP 
+            } 
+         }
+      }
+   } 
+	popuw	RPP
+   ld    SPIDR,SPI_BUFF 
+	popu	PPR
+	iret
 
 ;***************************************
 ;******** external or Software interrupt
 ;***************************************
 _B1_int::
-	 iret
+   iret
 
 _C0_int::
+   iret
+
 _C1_int::
+   iret
+
 _D0_int::
+   iret
+
+
 _D1_int::
 	push    PPR                             ; Save PPR
 	pushw   RPP                             ; Save RPP
@@ -948,7 +1447,7 @@ _D1_int::
 ;        or      T_TCR,#cen                 ; Start the timer
         spp     #0
         call    _frame_sample
-        or      EIMR,#00000001b            ; Re-enable other interrupts
+        or      EIMR,#10000001b            ; Re-enable other interrupts
       }
    }
 	popw    RPP                             ; Restore context    
@@ -1197,9 +1696,9 @@ FlashLed::
 ;  srp     #0
 	loop [r1] {
 	   call    LedOn
-	   delay   #40000
+      sleep   #200
 	   call    LedOff
-	   delay   #40000
+      sleep   #200
 	   cpl     r0
 	}
 	ret
@@ -1216,41 +1715,50 @@ LedOn::
 ;  set_bit  P2DR,r0
 	ret
 
+
+;**************************************************************************
+;******************  Composizione numeri telefonici  **********************
+;**************************************************************************
 				    
 ;****************************************
 ;******** Combinatore telefonico decadico
 ;****************************************
-comb_tel_dec::
+combtel_decadic::
 	ldw  rr8,#combtel_buffer
 	loop [r10] {                    ; r10 numeri da comporre
 	   ld      r11,(rr8)+           ; rr8 contiene i numeri
-comb::
 	   loop [r11] {
 	      clr_bit P5DR,REL1       
 	      delay   #20000            ; da calibrare
 	      set_bit P5DR,REL1
 	      delay   #20000            ; da calibrare
 	   }
-	   delay  #30000
-	   delay  #30000
-	   delay  #30000
-	   delay  #30000
+      sleep   #500
 	}
 	ret        
-
 
 
 ;****************************************
 ;************ Combinatore telefonico DTMF
 ;****************************************
-comb_tel_dtmf::
-	ld      r1,#20
-	loop  [r1] {
-		ld      r0,(rr8)+
-		call    _8880_data_wr        
-	}
+combtel_dtmf::
+   ldw     rr8,#combtel_buffer
+   do {
+      ld      r0,#1111b
+      call    _8880_ctrl_wr
+      ld      r0,#0000b
+      call    _8880_ctrl_wr
+      ld      r0,(rr8)+
+		call    _8880_data_wr
+      do {
+         nop
+         call    _8880_ctrl_rd
+         nop
+         ld      r1,r0
+         and     r0,#00000010b
+      } while [r0 == #0]
+   } while [(rr8) != #0]
 	ret
-
 
 
 ;**************************************************************************
@@ -1417,7 +1925,7 @@ disatt_viva_voce::
 cue_message::
 	pushuw     rr0
 	set_bit    P5DR,VOICE_CUE
-	delay      #50000
+   sleep      #100
 	clr_bit    P5DR,VOICE_CUE
 	popuw      rr0
 	ret
@@ -1425,52 +1933,152 @@ cue_message::
 reset_message::
 	pushuw     rr0
 	clr_bit    P5DR,VOICE_ADDR
-	delay      #50000
+   sleep      #100
 	set_bit    P5DR,VOICE_ADDR
 	popuw      rr0
 	ret
 
 
-rec_message::
+rec_begin::
 	pushu   PPR
 	spp     #P7D_PG
-	pushuw     rr0
+;   pushuw     rr0
 	clr_bit    P7DR,RECN
-	ldw        rr0,#40
-	loopw [rr0] {
-	   delay      #50000
-	}
-	set_bit    P7DR,RECN
-;  delay      #50000
+;   ldw        rr0,#40
+;   loopw [rr0] {
+;      sleep      #60
+;   }
+;   set_bit    P7DR,RECN
+;  sleep      #60
 ;  waitnobit  P7DR,#RECLEDN
+;   popuw      rr0
+	popu    PPR
+	ret
+
+rec_end::
+	pushu   PPR
+	spp     #P7D_PG
+;   pushuw     rr0
+;   clr_bit    P7DR,RECN
+;   ldw        rr0,#40
+;   loopw [rr0] {
+;      sleep      #60
+;   }
+	set_bit    P7DR,RECN
+;  sleep      #60
+;  waitnobit  P7DR,#RECLEDN
+;   popuw      rr0
+	popu    PPR
+	ret
+
+
+play_begin::
+	pushu   PPR
+	spp     #P7D_PG
+;   pushuw     rr0
+	clr_bit    P7DR,PLAYLN
+;   ldw        rr0,#30
+;   loopw [rr0] {
+;      sleep      #60
+;   }
+;   set_bit    P7DR,PLAYLN
+;  sleep      #60
 	popuw      rr0
 	popu    PPR
 	ret
 
-play_message::
+play_end::
 	pushu   PPR
 	spp     #P7D_PG
-	pushuw     rr0
-	clr_bit    P7DR,PLAYLN
-	ldw        rr0,#10
-	loopw [rr0] {
-	   delay      #50000
-	}
-	call    cue_message
-	ldw        rr0,#30
-	loopw [rr0] {
-	   delay      #50000
-	}
+;   pushuw     rr0
+;   clr_bit    P7DR,PLAYLN
+;   ldw        rr0,#30
+;   loopw [rr0] {
+;      sleep      #60
+;   }
 	set_bit    P7DR,PLAYLN
-;  delay      #50000
-	popuw      rr0
+;  sleep      #60
+;   popuw      rr0
 	popu    PPR
 	ret
+
+;**************************************************************************
+;************************ Toni linea telefonica ***************************
+;**************************************************************************
+
+;****************************************
+;************** Routine di riconoscimento
+;****************************************
+
+_tone_sample::
+   spp     #0
+;   ld      r0,#DTMFTONE
+;   call    _8880_ctrl_wr
+
+   ld      TONE_1,#0
+   ld      TONE_0,#0
+
+   sleep   #200
+
+   while [TONE_0 < #36]
+   {
+     nop
+   }
+
+;   ld      r0,#DTMFINOUT
+;   call    _8880_ctrl_wr
+jezza::
+   ld r1,TONE_1
+   if [[TONE_1 > #11] && [TONE_1 < #15]]     ; 11-15 
+   {
+     ld       r0,#TONEDIAL
+   }
+   if [[TONE_1 > #17] && [TONE_1 < #22]]     ; 17-22
+   {
+     ld       r0,#TONEBUSY
+   }
+   if [TONE_1 > #26]                         ; 26+
+   {
+     ld       r0,#TONEPBX
+   }
+   if [TONE_1 < #6]
+   {
+     ld       r0,#TONEHIZ
+   }
+   
+	ret
+
 
 ;**************************************************************************
 ;***************************** Telecomando ********************************
 ;**************************************************************************
 
+
+;****************************************
+;****************** Programmazione Timer0
+;****************************************
+T0_remote::        
+	pushuw  RPP
+	pushu   PPR
+	srp     #(15*2)                         ; Set register bank F
+	spp     #T0D_PG                         ; Set timer0 data page
+   ld      t_tcr,  #00000000b              ; Set timer control reg
+   ld      t_tmr,  #00000000b              ; Continuous/Retrigger mode
+	ld      t_icr,  #00000000b              ; Set input control reg
+   ld      t_idmr, #10000001b              ; Underflow interrupt
+   ld      t_prsr,#3                       ; 1 uSec prescaler value
+   ldw     t_reg0r,#1150                   ; 1150 uSec counter value 
+
+	spp     #T0C_PG                         ; Set timer0 control page
+   ld      t0_ivr,#T0_UNDERFLOW+2          ; Set int vector
+   ld      t0_idcr,#00000001b              ; Set Timer T0 int level=1
+	popu    PPR
+	popuw   RPP
+	ret
+
+;****************************************
+;*************** Campionamento principale
+;****************************************
 _frame_sample::
                                            ; time critical section begin
 ;   waitbit    P2DR,#REMOTE                 ; depends on int triggering
@@ -1498,139 +2106,224 @@ _frame_sample::
 	}
 	ret
 
-_remote_sample_old::
-	waitbit    P2DR,#REMOTE
-   delay      #80
-   waitnobit  P2DR,#REMOTE
-   delay      #5760                        ; first skip (to calibrate)
-   
-   call       _frame_sample                ; sample first frame
-;   ld    r6,#3                             ; other four samples
-;   loop  [r6] {
-;      ldw        rr8,(frame_buffer)        ; save previous frame
-;      waitbit    P2DR,#REMOTE
-;      delay      #80
-;      call       _frame_sample             ; sample next frame
-;      delay      #4000
-;      orw        (frame_buffer),rr8        ; defect-error logic
-;   }
-   ret
-
-
-_remote_sample::
-   ld      EIMR,#00000000b
-   waitbit P2DR,#REMOTE
-
-   spp     #T0D_PG                         ; Set timer0 data page
-   or      T_FLAGR,#cp0
-   or      T_TCR,#cen
-   spp     #0
-
-   waitnobit  P2DR,#REMOTE
-   
-   delay   #5800
-
-   spp     #T0D_PG                         ; Set timer0 data page
-   and     T_TCR,#~cen
-   spp     #0
-
-   delay   #4000
-   ld      EIMR,#00000001b
-
-   ret
-
 
 ;***********************************************************************
-;************************** Programmazione Timer 0
+;************************** Gestione bus i2c ***************************
 ;***********************************************************************
 
 ;****************************************
-;*************** Sincronismi telecomando
+;***************** Programmazione timer 0
 ;****************************************
 
-T0_remote::        
-	pushuw  RPP
-	pushu   PPR
-	srp     #(15*2)                         ; Set register bank F
-	spp     #T0D_PG                         ; Set timer0 data page
-   ld      t_tcr,  #00000000b              ; Set timer control reg
-   ld      t_tmr,  #00000000b              ; Continuous/Retrigger mode
-	ld      t_icr,  #00000000b              ; Set input control reg
-   ld      t_idmr, #10000001b              ; Underflow interrupt
-   ld      t_prsr,#3                       ; 1 uSec prescaler value
-   ldw     t_reg0r,#1150                   ; 1150 uSec counter value 
-
+proc T0_I2C [PPR]
+{
 	spp     #T0C_PG                         ; Set timer0 control page
    ld      t0_ivr,#T0_UNDERFLOW            ; Set int vector
-   ld      t0_idcr,#00000001b              ; Set Timer T0 int level=1
-	popu    PPR
-	popuw   RPP
-	ret
-	
-;****************************************
-;**************** Sincronismi toni linea
-;****************************************
+   ld      t0_idcr,#00000001b              ; Set timer0 int level=1
 
-T0_cptone::        
-	pushuw  RPP
-	pushu   PPR
-	srp     #(15*2)                         ; Set register bank F
 	spp     #T0D_PG                         ; Set timer0 data page
-	sdm
-	ld      t_tcr,  #00000000b              ; Set timer control reg
-   ld      t_tmr,  #00000000b              ; Set timer mode reg
-	ld      t_icr,  #00000000b              ; Set input control reg
-	ld      t_idmr, #10000001b              ; Enable timer T0 interrupt
-                                           ; on underflow event
-	ld      t_prsr,#0                       ; Load prescaler value
-	ldw     t_reg0r,#0                      ; Load capture0 value 
-	ldw     t_reg1r,#0                      ; Load capture1 value 
-	ldw     t_cmp0r,#0                      ; Load compare0 value 
-	ldw     t_cmp1r,#0                      ; Load compare1 value
+   ld      T_TCR,  #00000000b              ; Set timer control reg
+   ld      T_TMR,  #00000011b              ; Single/Retrigger mode
+   ld      T_ICR,  #00000000b              ; Set input control reg
+   ld      T_IDMR, #10000001b              ; Underflow interrupt
+   ld      T_PRSR, #3                      ; 1 usec prescaler value
+   ldw     T_REG0R,#5000                   ; 5 msec counter value
+   dec     TOT_LENGHT
+   while [CLZ] {
+      addw    WDTR,#5000                   ; 5 ms multiplied num. of bytes
+      dec     TOT_LENGHT
+	}	
+   or      T_TCR,  #cen                    ; Start the timer0
+}
 
-	spp     #T0C_PG                         ; Set timer0 control page
-   ld      t0_ivr,#T0_UNDERFLOW+2            ; Set int vector
-	ld      t0_idcr,#00000001b              ; Set Timer T0 int level=1
-	popu    PPR
-	popuw   RPP
-	ret
+
+;****************************************
+;*********** I2C bus operations on slaves
+;****************************************
+
+proc i2c_bus [PPR]
+{
+	spp	#0
+   spi_di
+   ld    SLAVE_W,SLAVE_R                   ; Slave read/write slave
+   or    SLAVE_R,#1
+   ld    TOT_LENGHT,LENGHT                 ; Save LENGHT before decrement.
+   ifbit I2C_STAT,#SLAVE_READY                ; Test if bus is free
+      switch [I2C_OP] {
+         case  #READ:
+            ld       SPI_STAT,#TRANS_CTRL  ; Slave address
+            ld       I2C_STAT,#LECT_ON     ; Start read condition
+            ld       SPIDR,#SLAVE_W        ; write mode address
+         case  #VERIFY:
+            ld       SPI_STAT,#TRANS_CTRL  ; Slave address
+            ld       I2C_STAT,#VERIF_ON    ; Start verify condition
+            ld       SPIDR,#SLAVE_R        ; read mode address
+         case  #WRITE:
+            ld       SPI_STAT,#TRANS_CTRL  ; Slave address
+            ld       I2C_STAT,#ECR_ON      ; Start write condition
+            ld       SPIDR,#SLAVE_W        ; write mode address
+      }
+      call     GEN_START                   ; SPI and interrupt init
+   }
+}
+
+;****************************************
+;************* START condition generation
+;****************************************
+proc GEN_START [PPR]
+{
+   spp      #0                         ; SPI and ext. interrupts registers in page 0.
+   and      SPICR,#~spen               ; Disable SPI -> SDA, SCK in HZ
+   and      P2DR,#~SDO_MASK            ; Prepare "0" on output buffer of SDO.
+   spp      #P2C_PG
+   and      P2C0R,#~SDO_MASK           ; SDO line in output -> SDA line = "0".
+   delay    #2                         ; Wait for start condition hold time.
+   spp      #0
+   or       SPICR,#spen                ; Enable SPI.
+   spi_ei                              ; Enable SPI interrupt.
+   spp      #P2C_PG
+   or       P2C0R,#SDO_MASK            ; SDO line in AF.
+}
+
+;****************************************
+;************** STOP condition generation
+;****************************************
+proc GEN_STOP [PPR]
+{
+   spp      #0
+   spi_di                              ; Disable SPI interrupt.
+   and      P2DR,#~SDO_MASK            ; Prepare "0" on output buffer of SDO.
+   spp      #P2C_PG
+   and      P2C0R,#~SDO_MASK           ; SDO line in output -> SDA line = "0".
+   spp      #0 
+   and      SPICR,#~spen               ; Disable SPI -> SCK line = "1".
+   delay    #2                         ; Wait for stop condition setup.
+   spp      #P2C_PG
+   or       P2C0R,#SDO_MASK            ; SDO in AF -> SDA line = "1".
+}
+
+;****************************************
+;***** ACK pulse generation and force SDA
+;****************************************
+proc GEN_ACK [PPR]
+{
+   pushu PPR
+   and      P2DR,#~SDO_MASK            ; Prepare "0" on output buffer of SDO.
+   spp      #P2C_PG                    
+   and      P2C0R,#~SDO_MASK           ; SDO line in output -> SDA line = "0".
+   spp      #0 
+   and      SPICR,#~spen               ; Disable SPI -> SCK line = "1".
+   delay    #2                         ; Wait for ACK hold time.
+   or       SPICR,#spen                ; Enable SPI -> Force SDA and SCK low.
+   spp      #P2C_PG
+   or       P2C0R,#SDO_MASK            ; SDO line in AF.
+}
+
+;****************************************
+;*** ACK pulse generation and slave check
+;****************************************
+proc TEST_ACK [PPR]
+{
+   and     SPICR,#~spen                ; Release SPI lines in disabling it.
+   waitbit P2DR,#SCK_MASK              ; Wait for SCK going high.
+   ifbit   P2DR,#SDI_MASK              ; Check if receiver has acknowledged.
+      ld      I2C_STAT,#NO_ACK         ; If no ACK 
+   } else {  
+      delay   #2                       ; Wait for high period of the clock.
+   } 
+   or SPICR,#spen                      ; Enable SPI -> Force SDA low.
+}
+
+;**************************************************************************
+;***************************** Routines varie *****************************
+;**************************************************************************
+
 
 
 
 ;**************************************************************************
-;************************ Messaggi per il display *************************
+;************************** Dati statici in rom ***************************
 ;**************************************************************************
 
-message_open::          .asciz  "  TELESOCCORSO  "
-message_name::          .asciz  "  Nova Elettra  "
+;                        .org    12800
+id::                    .asciz  "TS FW.05B Tuccia"
+
+;****************************************
+;**************** Messaggi per il display
+;****************************************
+
+message_open::          .asciz  "    PT117/96    "
+message_name::          .asciz  "Nova Elettra srl"
 message_diag::          .asciz  "  AUTODIAGNOSI  "
-
-message_ready::         .asciz  "  TELESOCCORSO  "
+message_attenzione::    .asciz  "Hard Ok  Soft Ok"
+message_ok::            .asciz  "   INOLTRATO    "
+message_ready::         .asciz  "Nova PT117 FW0.5"
 message_time::          .asciz  "  ORE ##:##:##  "
 message_alarm::         .asciz  "Allarme in corso"
 message_alrem::         .asciz  "da telecomando  "
 message_altrig::        .asciz  "da pulsante     "
 message_altime::        .asciz  "per fine tempo  "
 message_break::         .asciz  "   ANNULLATO    "
-                                 
+message_attendere::     .asciz  "attendere prego."
+
 message_call::          .asciz  "Composizione del"
 message_noresp::        .asciz  ""
 message_resp::          .asciz  "Risponde il num."
+                                   
+message_progst::        .asciz  " Programmazione "
+message_tastipr::       .asciz  " *   0 Ok   #~ "
+message_tastibegin::    .asciz  "Alzare cornetta!"
+message_tastiend1::     .asciz  "    Alla fine   "
+message_tastiend2::     .asciz  "  riagganciare. "
+message_fineprog1::     .asciz  " Programmazione "
+message_fineprog2::     .asciz  "   terminata.   "
+menu_oradata::          .asciz  "   Ora / Data  ~"
+menu_messaggi::         .asciz  "   Messaggi   ~"
+menu_numeri::           .asciz  "  Numeri Tel. ~"
+menu_telecomando::      .asciz  " Telecomando  ~"
+menu_tempi::            .asciz  "    Tempi     ~"
+menu_riservato::        .asciz  "  Riservato    "
+sub_oradata1::          .asciz  "Non disponibile!"
+sub_oradata2::          .asciz  " *             "
+sub_messaggi1::         .asciz  "    Registra    "
+sub_messaggi2::         .asciz  " *   0 procedi "
+sub_numeri1::           .asciz  "  Numeri Tel. ~"
+sub_numeri2::           .asciz  " *             "
+sub_telecomando1::      .asciz  " Telecomando  ~"
+sub_telecomando2::      .asciz  " *             "
+sub_tempi1::            .asciz  "    Tempi     ~"
+sub_tempi2::            .asciz  " *             "
+sub_riservato1::        .asciz  "  Riservato    "
+sub_riservato2::        .asciz  " *             "
+messaggi_begin1::       .asciz  "  Parlare nel   "
+messaggi_begin2::       .asciz  " microfono....  "
+messaggi_end1::         .asciz  "   Messaggio    "
+messaggi_end2::         .asciz  "  registrato.   "
 
-message_progst::        .asciz  "Riprogrammazione"
-message_attenzione::    .asciz  " NON SUPPORTATA "
+message_cornetta::      .asciz  "Cornetta telef. "
+message_abbassata::     .asciz  "   ABBASSATA    "
+message_alzata::        .asciz  "     ALZATA     "
 
 malvenuto::             .asciz  "Guarda i numeri:"
 telesoccorso::          .asciz  "Il telesoccorso:"
 telecomando::           .asciz  "Il telecomando: "
 
+msgtony::               .asciz  "Linea telefonica"
+msgoccupato::           .asciz  "    OCCUPATA    "
+msglibero::             .asciz  "     LIBERA     "
+msgpbx::                .asciz  "   PBX LIBERO   "
+msghiz::                .asciz  " ALTA IMPEDENZA "
+
+numero::                .byte   1,5,0
+
+
 
 ;**************************************************************************
-;*************************** Definizione dei dati *************************
+;****************** Definizione dei dati dinamici in RAM ******************
 ;**************************************************************************
     
    .data
-  ;.org    0
+;   .org    0
 
 ;//////////////////////// per usare emulatore /////////////////
    .org 200h
@@ -1642,8 +2335,9 @@ line2::                 .blkb   16
 
 frame_buffer::          .blkw   2               ; format: 0xxxxxx00xxxxxx0
 
-combtel_buffer::        .blkb   16              ; buffer of 32 numbers
+combtel_buffer::        .blkb   32              ; buffer of 32 numbers
 
+i2c_buffer::            .blkb   8               ; buffer for i2c bus
 
-
+time_buffer::           .blkb   6               ; buffer for real time clock
 

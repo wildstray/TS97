@@ -8,8 +8,8 @@
 ;* ldw_mm               dst,src         ; memory to memory word load
 ;* clrw                 op              ; clear word
 ;* cpl2_w               wr              ; 2 complement word
-;* T0_start                             ;
-;* T0_stop                              ;
+;* T0_start                             ; start T0 timer
+;* T0_stop                              ; stop T0 timer
 ;* rdwr_data_to_SPI                     ; r0->SPI SPI->r0
 ;* enable_RX_int                        ;
 ;* disable_RX_int                       ;
@@ -18,6 +18,13 @@
 ;* delay                us              ; ritardo di xxxxx us (fino 65535)
 ;* sleep                ms              ; ritardo di xxxxx ms (fino 65535)
 ;* print                where,msg       ; visualizza il messaggio msg
+;* relay1               on/off          ; eccita/diseccita il relay 1
+;* relay2               on/off          ; eccita/diseccita il relay 2
+;* spi_di                               ; disable SPI interrupt
+;* spi_ei                               ; enable SPI interrupt
+;* byte2bcd             byte,bcd10,bcd1 ; byte to BCD (10,1)
+;* bcd2byte             bcd10,bcd1,byte ; BCD (10,1) to byte
+;* i2c            opr,slave,addr,lenght ; read/write/verify i2c slaves
 ;*************************************************************************
 
 ;************************             
@@ -56,7 +63,6 @@
 .macro  T0_start
 	pushu   PPR
 	spp     #T0D_PG
-;   and     T_TCR,#~ccl
    or      T_TCR,#cen
 	popu    PPR
 .endm
@@ -65,7 +71,6 @@
 	pushu   PPR
 	spp     #T0D_PG
    and     T_TCR,#~cen
-;   or      T_TCR,#ccl
    popu    PPR
 .endm
 ;************************
@@ -147,5 +152,90 @@
 	popuw   rr0
 .endm
 ;************************
-
-
+.macro   spi_di       
+   and   EIPR,#~ipb0m
+   and   EIMR,#~ib0m 
+.endm
+;************************
+.macro   spi_ei
+   and   EIPR,#~ipb0m  
+	nop
+   or    EIMR,#ib0m    
+.endm
+;************************
+.macro   relay1 status
+   pushu r0
+   ld    r0,#status
+   if [r0 == #0]
+   {
+      clr_bit P5DR,REL1
+   } else {
+      set_bit P5DR,REL1
+   }
+   popu  r0
+.endm
+;************************
+.macro   relay2 status
+   pushu r0
+   ld    r0,#status
+   if [r0 == #0]
+   {
+      clr_bit P5DR,REL2
+   } else {
+      set_bit P5DR,REL2
+   }
+   popu  r0
+.endm
+;************************
+.macro byte2bcd byte,bcd10,bcd1
+   pushu   r0
+   ld      r0,byte
+   ld      bcd1,r0
+   and     bcd1,#0Fh
+   ld      bcd10,r0
+   and     bcd10,#0F0h
+   swap    bcd10
+   popu    r0
+.endm
+;************************
+.macro bcd2byte bcd10,bcd1,byte
+   pushu   r0
+   ld      r0,bcd10
+   swap    r0
+   or      r0,bcd1
+   ld      byte,r0
+   popu    r0
+.endm
+;************************
+.macro i2c opr,slave,addr,lenght
+   ld    I2C_OP,#opr
+   ld    SLAVE_W,#slave
+   ld    rr0,#addr
+   ld    LENGHT,#lenght
+   ifw [I2C_ADDR > #255]                 
+   {                                     
+      and   r0,#00000111b
+      ror   r0
+      or    SLAVE_W,r0
+   }
+   ld    I2C_ADDR,r1
+   call  i2c_bus
+.endm
+;************************
+.macro bcd2ascii bcd,ascii
+   switch [bcd]
+   {
+      case #0:
+            ld      ascii,#48
+      case #10:
+            ld      ascii,#48
+      case #11:         
+            ld      ascii,#42
+      case #12:         
+            ld      ascii,#35
+      default:          
+            ld      ascii,bcd
+            add     ascii,#48
+   }
+.endm
+;************************
