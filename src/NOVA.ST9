@@ -61,27 +61,28 @@
 ;***************************************
 ;********************* STACK Declaration
 ;***************************************
-;SSTACK      := ( 15 * 16 ) - 1      ; System stack address group C B
-;USTACK      := ( 12 * 16 ) - 1      ; User stack address group A
+;SSTACK      := (15 * 16)               ; System stack address group C B
+;USTACK      := (12 * 16)               ; User stack address group A
 ;//////////////////////// per usare emulatore///////////////////
-SSTACK      := ( 13 * 16 ) - 1      ; System stack address group C B
-USTACK		:=	( 11 * 16 ) - 1		; User stack address group A
+SSTACK      := (13 * 16)                ; System stack address group C B
+USTACK      := (11 * 16)                ; User stack address group A
 ;//////////////////////// per usare emulatore///////////////////
 
 
 ;***************************************
 ;********* text section absolute address
 ;***************************************
-START_IT_TABLE  = 0                     ; Start of interrupt vector table
-SCI_VEC         = 040h                  ; Start SCI int vector
-EXT_INT_VEC     = 050h                  ; External interrupt base vector
-T0_UNDERFLOW    = 0C0h                  ; T0 int vector
-START_CODE      = 100h                  ; Start of C startup code
+IVR_TABLE       = 0                     ; Start of interrupt vector table
+SCI_IVR         = 040h                  ; Start SCI int vector
+EXT_IVR         = 050h                  ; External interrupt base vector
+MFT_IVR         = 0C0h                  ; Multifunction timer int vector
+START           = 100h                  ; Start of C startup code
+SDATA           = 3000h                 ; Static data start
 
 REMOTE_TEST     = 0101010001010000b     ; Test pattern for remote
 
-on              = 1
-off             = 0
+on              = 1             
+off             = 0            
 
 ;***************************************
 ;********************* I/O ports equates
@@ -181,7 +182,6 @@ TONEBUSY        = 3
 ;**************
 ;******* Bank 8             
 ;**************
-DIAG_PG  = 8
 DISP_C  := R142                         ; 
 DISP_F  := R141                         ; 
 ;        := R140                         ;
@@ -229,6 +229,7 @@ REM_F   := R128                         ;
 ;**************
 ;******* Bank 5                         ; I2C slave data
 ;**************
+I2C_BUFF == 94
 ;       :=RR94
 ;       :=RR92
 ;       :=RR90
@@ -243,21 +244,22 @@ REM_F   := R128                         ;
 ;**************
 ;******* Bank 4                         ; I2C bus manager
 ;**************
-COUNTER    :=  R79
-TOT_LENGHT :=  R78
-SLAVE_W    :=  R73                      ; Write slave control byte
-SLAVE_R    :=  R72                      ; Read slave control byte
-SPI_BUFF   :=  R71
-LENGHT     :=  R70                      ; Number of bytes to be transfert.
-lenght     :=  r6
-SPI_STAT   :=  R69
-SLAVE_STAT :=  R68
-SLAVE_OP   :=  R67
-READ_DATA  :=  R66                      ; Data witch has been read slave.
-read_data  :=  r2
-WRITE_DATA :=  R65                      ; Data to be programmed in the slave.
-write_data :=  r1
-SLAVE_ADDR :=  R64                      ; Operation address in the slave.
+TOT_LENGHT := RR78
+SLAVE_W    :=  R77                      ; Write slave control byte
+SLAVE_R    :=  R76                      ; Read slave control byte
+
+COUNTER    := RR70                      ; Bytes already transferred.
+counter    :=  rr6
+LENGHT     := RR70                      ; Number of bytes to be transfert.
+lenght     :=  rr6
+
+I2C_SLAVE  :=  R69                      ; Slave control byte.
+SPI_STAT   :=  R68                      ; SPI transfer status.
+SLAVE_STAT :=  R67                      ; Slave status.
+SLAVE_OP   :=  R66                      ; Operation to do by the slave.
+SLAVE_ADDR :=  R65                      ; Address in the slave memory.
+BUFFER     :=  R64                      ; Temporary data to been transferred.
+buffer     :=  r0
 
 
 ;**************
@@ -289,10 +291,10 @@ SLAVE_ADDR :=  R64                      ; Operation address in the slave.
 
 
 ;**************
-;******* Bank 1                         ; Page #1 context register
+;******* Bank 1                         ; Page #1 free run space
 ;**************
-;       :=RR30                          ; Don't define!
-;       :=RR28                           
+;       :=RR30                          
+;       :=RR28                          
 ;       :=RR26                          
 ;       :=RR24
 ;       :=RR22
@@ -327,9 +329,6 @@ SLAVE_READY  == 80h                 ; Slave is ready for a new operation...
 
 
 
-
-
-
 ;**************************************************************************
 ;************************ TS INITIALIZATIONS CODE  ************************
 ;**************************************************************************
@@ -341,18 +340,18 @@ SLAVE_READY  == 80h                 ; Slave is ready for a new operation...
 ;***************************************
 
 
-   .org    START_IT_TABLE
+   .org    IVR_TABLE
 	.word   st9$entry                       ; Reset interrupt vector:Entry point
 	.word   _trap_div0                      ; Divide by 0 interrupt service routine
 	.word   _top_level_int                  ; Top Level interrupt service routine
 	;***********************        
-   .org    SCI_VEC
+   .org    SCI_IVR
    .word   _SCI_it_s_rec_err               ; SCI receiver err int service
 	.word   _SCI_9th_bit                    ; SCI 9th bit int service
    .word   _SCI_it_receive                 ; SCI RX int service
    .word   _SCI_it_transmit                ; SCI TX int service
 	;***********************        
-   .org    EXT_INT_VEC                             
+   .org    EXT_IVR                             
    .word   _A0_int                         ; Interrupt A0 ( Watchdog )
    .word   _A1_int                         ; Interrupt A1 ( 8880 IRQ )
    .word   _B0_int                         ; Interrupt B0 ( SPI int  )
@@ -362,7 +361,7 @@ SLAVE_READY  == 80h                 ; Slave is ready for a new operation...
    .word   _D0_int                         ; Interrupt D0 ( External )
    .word   _D1_int                         ; Interrupt D1 ( External )
 	;***********************        
-   .org    T0_UNDERFLOW
+   .org    MFT_IVR
    .word   _T0_int_0                       ; Multifunction timer interrupt
    .word   _T0_int_1                       ; Multifunction timer interrupt
    .word   _T0_int_2                       ; Multifunction timer interrupt
@@ -374,7 +373,7 @@ SLAVE_READY  == 80h                 ; Slave is ready for a new operation...
 ;***************************************
 ;************ Linker options entry point
 ;***************************************
-   .org    START_CODE                           ; Start code
+   .org    START                                ; Start code
 	;***********************        
 st9$entryRS::                                   ; Entry point for Separate 
    sdm                                          ; Read Only Environment -iI
@@ -399,14 +398,10 @@ st9$entry_GO::                                  ;
 
 	spp     #0                              ; Init page pointer register
    ld      moder,#(sspm | uspm | div2m)    ; Set USP,SSP in int reg - Ck/2
-   ld      usplr,#(USTACK+1)               ; Init User stack pointer
-   ld      ssplr,#(SSTACK+1)               ; Init System stack pointer
-;  ld      cicr,#10001111b                 ; CPL=7,DI,enable counter,nested 
-;////////////////////// per usare emulatore ////////////////
+   ld      usplr,#(USTACK)                 ; Init User stack pointer
+   ld      ssplr,#(SSTACK)                 ; Init System stack pointer
    ld      cicr,#(gcenm | iamm | cplm)     ; CPL=7,DI,enable counter,nested 
-;///////////////////////////////////////////////////////////
-;   and     flagr,#03h                      ; Clr flag register
-   clr     flagr
+   and     flagr,#03h                      ; Clr flag register
 
    srp     #(15*2)                         ; Set bank register F
 
@@ -453,9 +448,8 @@ st9$entry_GO::                                  ;
 ;*************** interupts configuration
 ;***************************************
    spp     #EXINT_PG                       ; External interrupts page  
-;   ld      eimr,#00000001b                 ; Unmask interrupts
-   ld      eimr,#00000000b                 ; Unmask interrupts
-   ld      eitr,#10001001b                 ; Set int triggers
+   ld      eimr,#00000001b                 ; Unmask interrupts
+   ld      eitr,#10001101b                 ; Set int triggers
    ld      eivr,#01010100b                 ; Set int_vect=5X / NMI
    ld      eiplr,#01100100b                ; Interrups priority (A-D-BC)
 ;  clr     nicr                            ; NMI TLI disabled   
@@ -464,7 +458,6 @@ st9$entry_GO::                                  ;
 ;///////////////////////////////////////////////////////////
 	ld      wcr,#01000000b                  ; Disable WatchDog
    clr     eipr                            ; Clear ext pending int.
-;   nop
 
 ;***************************************
 ;****************************** init SCI
@@ -472,7 +465,7 @@ st9$entry_GO::                                  ;
 	spp     #SCI1_PG                        ; Set SCI page register
 	ld      s_brghr,#00                     ; Set baud_rate=19.200
 	ld      s_imr,#00h                      ; Set int mask register
-	ld      s_ivr,#SCI_VEC                  ; SCI interrupt vector
+   ld      s_ivr,#SCI_IVR                  ; SCI interrupt vector
    ld      s_idpr,#00h                     ; Set interrupt priority=2
    ld      s_chcr,#(wl8 | sb10)            ; 8 data, 1 stop, no parity
    ld      s_ccr,#0                        ; 16X, internal baud rate
@@ -491,11 +484,10 @@ st9$entry_GO::                                  ;
 ;***************************************
 ;****************************** init SPI
 ;***************************************
-;   spp     #SPI_PG                         ; Set SPI page
-;   ld      spicr,#(bms | SP_128)           ; I2C bus, 100KHz clock
+   spp     #SPI_PG                         ; Set SPI page
+   ld      spicr,#(bms | SP_128)           ; I2C bus, 100KHz clock
 
-
-
+                     
 ;***************************************
 ;******************** Serial line enable
 ;***************************************
@@ -522,13 +514,15 @@ init::
 	srp     #0                              ; Set register bank 0
 	spp     #0                              ; Set Page 0
 
-    
-
 	call    display_init
 	call    _8880_init
    clr     EIPR
 ;   nop
+
    ei
+;jx i2c_test
+
+
 
 open::
 
@@ -1201,7 +1195,9 @@ tony::
 
 
 i2c_test::
+
      ld SLAVE_STAT,#SLAVE_READY
+     pushu EIMR
 
 ;     ldw     rr6,#i2c_buffer
 ;     ldw     rr10,#num2
@@ -1210,19 +1206,15 @@ i2c_test::
 ;        lddp (rr6)+,(rr10)+
 ;     }
 
-;     i2c READ, E2_SLAVE, #0, #8
+     and   EIMR,#00000000b
 
-   srp #0
-   spp #0
+     i2c READ, RTC_SLAVE, #0, #4
 
-   ld SLAVE_OP,#READ
-   ld SLAVE_ADDR,#0
-   ld SLAVE_W,#E2_SLAVE
-   ld LENGHT,#8    
+     clr   EIPR
+     popu  EIMR
+     sleep #100
 
-   call  i2c_bus
 
-   waitbit SLAVE_STAT,#SLAVE_READY
    jx  i2c_test
 
 
@@ -1479,13 +1471,19 @@ _B0_int::
    pushuw  RPP
    srp     #(4*2)
    spp     #0
-;   sdm
    if [SPI_STAT == #TRANS_DRD]           
    {
-      ld    read_data,SPIDR         
-      ld    i2c_buffer(lenght),read_data
-      dec   lenght           
+      ld    buffer,SPIDR         
+
+      ld    i2c_buffer(lenght),buffer
+      decw  lenght
       if    [SETZ]
+
+;      ld    i2c_buffer(counter),buffer
+;      incw  counter
+;      if    [counter > lenght]
+
+
       {
          call  GEN_STOP   
          ld    SLAVE_STAT,#SLAVE_READY 
@@ -1493,7 +1491,7 @@ _B0_int::
          call  GEN_ACK 
          ld    SPI_STAT,#TRANS_DRD
          spp   #0
-         ld    SPI_BUFF,#0FFH 
+         ld    buffer,#0FFH 
       } 
 	} else {
       call  TEST_ACK          
@@ -1508,32 +1506,30 @@ _B0_int::
             {
                ld    SPI_STAT,#TRANS_DRD
                spp   #0
-               ld    SPI_BUFF,#0FFH 
+               ld    buffer,#0FFH 
 				} else {
                ld    SPI_STAT,#TRANS_ADDR
 					spp	#0
-               ld    SPI_BUFF,SLAVE_ADDR
+               ld    buffer,SLAVE_ADDR
             }
          case  #TRANS_ADDR:
             if [SLAVE_OP == #READ]
             {
                call  GEN_START   
                ld    SPI_STAT,#TRANS_CTRL
-               ld    SPI_BUFF,#SLAVE_R
+               ld    buffer,SLAVE_R
                ld    SLAVE_STAT,#VERIF_ON  
 				} else {
 					spp	#0
                ld    SPI_STAT,#TRANS_DWR
-               ld    write_data,i2c_buffer(lenght)
-               ld    SPI_BUFF,write_data
+               ld    buffer,i2c_buffer(lenght)
             } 
          case  #TRANS_DWR:
 				spp	#0
-            dec   lenght  
+            decw  lenght  
             if    [CLZ]
             {
-               ld    write_data,i2c_buffer(lenght)
-               ld    SPI_BUFF,write_data
+               ld    buffer,i2c_buffer(lenght)
             } else {  
                call  T0_I2C
                call  GEN_STOP 
@@ -1541,8 +1537,8 @@ _B0_int::
          }
       }
    } 
+   ld    SPIDR,buffer
 	popuw	RPP
-   ld    SPIDR,SPI_BUFF 
 	popu	PPR
 	iret
 
@@ -1702,7 +1698,7 @@ _display_nibble_wr::
 	pushu   PPR
 	spp     #P7D_PG
 	;***********************
-   or      P7DR,#ENABLE            ; set bit 2
+   or      P7DR,#ENABLE            ; set E
 	;*********************** 
 	swap    r0
 	and     r0,#00001111b
@@ -1768,7 +1764,8 @@ _display_ready::
 	;***********************
 	ld      P4DR,#01011111b         ; modo instruzioni & read
 	;***********************
-   loop {
+   ld     r2,#0FFh
+   loop [r2] {
 	   call    _display_read
       ifnobit r0,10000000b         ; controlla il BF
 	      break
@@ -2011,8 +2008,8 @@ _8880_ctrl_rd::
 _8880_pwd::
 	push    P4DR
 	ld      r1,P4DR
-   and     r1,#~(O2)               ;pongo O2  a 0 
-   or      r1,#CSN                 ;pongo CS* a 1 
+   and     r1,#~(O2)               ; pongo O2  a 0 
+   or      r1,#CSN                 ; pongo CS* a 1 
 	ld      P4DR,r1
 	pop     P4DR
 	ret
@@ -2204,7 +2201,7 @@ T0_remote::
    ldw     t_reg0r,#1150                   ; 1150 uSec counter value 
 
 	spp     #T0C_PG                         ; Set timer0 control page
-   ld      t0_ivr,#T0_UNDERFLOW+2          ; Set int vector
+   ld      t0_ivr,#MFT_IVR+2               ; Set int vector
    ld      t0_idcr,#00000001b              ; Set Timer T0 int level=1
 	popu    PPR
 	popuw   RPP
@@ -2215,7 +2212,7 @@ T0_remote::
 ;****************************************
 _frame_sample::
                                            ; time critical section begin
-;   waitbit    P2DR,#REMOTE                 ; depends on int triggering
+;   waitbit    P2DR,#REMOTE                ; depends on int triggering
    waitnobit  P2DR,#REMOTE                 ; depends on int triggering
    ldw        rr0,#frame_buffer            ; loads the frame buffer
 	ldw        (rr0),#0                     ; zero the buffer
@@ -2251,8 +2248,9 @@ _frame_sample::
 
 proc T0_I2C [PPR]
 {
+stoppo::
 	spp     #T0C_PG                         ; Set timer0 control page
-   ld      T0_IVR,#T0_UNDERFLOW            ; Set int vector
+   ld      T0_IVR,#MFT_IVR                 ; Set int vector
    ld      T0_IDCR,#00000010b              ; Set timer0 int level=x
 
 	spp     #T0D_PG                         ; Set timer0 data page
@@ -2262,10 +2260,10 @@ proc T0_I2C [PPR]
    ld      T_IDMR, #10000001b              ; Underflow interrupt
    ld      T_PRSR, #3                      ; 1 usec prescaler value
    ldw     T_REG0R,#5000                   ; 5 msec counter value
-   dec     TOT_LENGHT
+   decw    TOT_LENGHT
    while [CLZ] {
       addw    T_REG0R,#5000                ; 5 ms multiplied num. of bytes
-      dec     TOT_LENGHT
+      decw    TOT_LENGHT
 	}	
    or      T_TCR,  #cen                    ; Start the timer0
 }
@@ -2277,29 +2275,29 @@ proc T0_I2C [PPR]
 
 proc i2c_bus [PPR]
 {
-i2c_b::
-   spp	#0
+i2cb::
+   spp   #0
    spi_di
    ld    SLAVE_R,SLAVE_W                   ; Slave read/write slave
    or    SLAVE_R,#1
-   ld    TOT_LENGHT,LENGHT                 ; Save LENGHT before decrement.
+   ldw   TOT_LENGHT,LENGHT                 ; Save LENGHT before decrement.
    ifbit SLAVE_STAT,#SLAVE_READY           ; Test if bus is free
       switch [SLAVE_OP] {
          case  #READ:
             call     GEN_START             ; SPI and interrupt init
             ld       SPI_STAT,#TRANS_CTRL  ; Slave address
             ld       SLAVE_STAT,#LECT_ON   ; Start read condition
-            ld       SPIDR,#SLAVE_W        ; write mode address
+            ld       SPIDR,SLAVE_W         ; write mode address
          case  #VERIFY:
             call     GEN_START             ; SPI and interrupt init
             ld       SPI_STAT,#TRANS_CTRL  ; Slave address
             ld       SLAVE_STAT,#VERIF_ON  ; Start verify condition
-            ld       SPIDR,#SLAVE_R        ; read mode address
+            ld       SPIDR,SLAVE_R         ; read mode address
          case  #WRITE:
             call     GEN_START             ; SPI and interrupt init
             ld       SPI_STAT,#TRANS_CTRL  ; Slave address
             ld       SLAVE_STAT,#ECR_ON    ; Start write condition
-            ld       SPIDR,#SLAVE_W        ; write mode address
+            ld       SPIDR,SLAVE_W         ; write mode address
       }
    }
 }
@@ -2309,19 +2307,19 @@ i2c_b::
 ;****************************************
 proc GEN_START [PPR]
 {
-   spp      #0                         ; SPI and ext. interrupts registers in page 0.
-;   and      SPICR,#~spen               ; Disable SPI -> SDA, SCK in HZ
-   ld       SPICR,#42h                  ; Disable SPI -> SDA, SCK in HZ
-   and      P2DR,#~SDO            ; Prepare "0" on output buffer of SDO.
+   spp      #0                         ; SPI and ext. ints. in page 0.
+   and      SPICR,#~spen               ; Disable SPI -> SDA, SCK in HZ
+;   ld       SPICR,#(bms | SPI_128)    ; Disable SPI -> SDA, SCK in HZ
+   and      P2DR,#~SDO                 ; Prepare "0" on output buffer of SDO.
    spp      #P2C_PG
-   and      P2C0R,#~SDO           ; SDO line in output -> SDA line = "0".
+   and      P2C0R,#~SDO                ; SDO line in output -> SDA line = "0".
    delay    #3                         ; Wait for start condition hold time.
    spp      #0
    or       SPICR,#spen                ; Enable SPI.
    nop
    spi_ei                              ; Enable SPI interrupt.
    spp      #P2C_PG
-   or       P2C0R,#SDO            ; SDO line in AF.
+   or       P2C0R,#SDO                 ; SDO line in AF.
 }
 
 ;****************************************
@@ -2331,14 +2329,14 @@ proc GEN_STOP [PPR]
 {
    spp      #0
    spi_di                              ; Disable SPI interrupt.
-   and      P2DR,#~SDO            ; Prepare "0" on output buffer of SDO.
+   and      P2DR,#~SDO                 ; Prepare "0" on output buffer of SDO.
    spp      #P2C_PG
-   and      P2C0R,#~SDO           ; SDO line in output -> SDA line = "0".
+   and      P2C0R,#~SDO                ; SDO line in output -> SDA line = "0".
    spp      #0 
    and      SPICR,#~spen               ; Disable SPI -> SCK line = "1".
    delay    #3                         ; Wait for stop condition setup.
    spp      #P2C_PG
-   or       P2C0R,#SDO            ; SDO in AF -> SDA line = "1".
+   or       P2C0R,#SDO                 ; SDO in AF -> SDA line = "1".
 }
 
 ;****************************************
@@ -2346,15 +2344,15 @@ proc GEN_STOP [PPR]
 ;****************************************
 proc GEN_ACK [PPR]
 {
-   and      P2DR,#~SDO            ; Prepare "0" on output buffer of SDO.
+   and      P2DR,#~SDO                 ; Prepare "0" on output buffer of SDO.
    spp      #P2C_PG                    
-   and      P2C0R,#~SDO           ; SDO line in output -> SDA line = "0".
+   and      P2C0R,#~SDO                ; SDO line in output -> SDA line = "0".
    spp      #0 
    and      SPICR,#~spen               ; Disable SPI -> SCK line = "1".
    delay    #3                         ; Wait for ACK hold time.
    or       SPICR,#spen                ; Enable SPI -> Force SDA and SCK low.
    spp      #P2C_PG
-   or       P2C0R,#SDO            ; SDO line in AF.
+   or       P2C0R,#SDO                 ; SDO line in AF.
 }
 
 ;****************************************
@@ -2363,8 +2361,8 @@ proc GEN_ACK [PPR]
 proc TEST_ACK [PPR]
 {
    and     SPICR,#~spen                ; Release SPI lines in disabling it.
-   waitbit P2DR,#SCK              ; Wait for SCK going high.
-   ifbit   P2DR,#SDI              ; Check if receiver has acknowledged.
+   waitbit P2DR,#SCK                   ; Wait for SCK going high.
+   ifbit   P2DR,#SDI                   ; Check if receiver has acknowledged.
       ld      SLAVE_STAT,#NO_ACK       ; If no ACK 
    } else {  
       delay   #3                       ; Wait for high period of the clock.
@@ -2379,16 +2377,16 @@ proc TEST_ACK [PPR]
 proc clock [PPR,r0,r1,r2,r3,r4,r5,r6,r7]
 {
    i2c     READ,RTC_SLAVE,#0,#4
-;   ldw     rr0,#line2
-;   ldw     rr2,#i2c_buffer
+
    ldw     rr6,#0
    ldw     rr4,#15
    loopw [rr4] {
       ifw [line2(rr4) == #2323h]
       {
-         incw  rr6
          ld    r0,i2c_buffer(rr6)
-         cicco::
+         incw  rr6
+
+cicco::
          byte2bcd r0,r2,r1
 
          bcd2ascii r1,r1
@@ -2403,7 +2401,7 @@ proc clock [PPR,r0,r1,r2,r3,r4,r5,r6,r7]
 ;************************** Dati statici in rom ***************************
 ;**************************************************************************
 
-;                        .org    (12*1024)
+;                        .org    SDATA
 id::                    .asciz  "TS FW.05B Tuccia"
 
 ;****************************************
@@ -2499,7 +2497,8 @@ frame_buffer::          .blkw   2               ; format: 0xxxxxx00xxxxxx0
 
 combtel_buffer::        .blkb   32              ; buffer of 32 numbers
 
-i2c_buffer::            .blkb   8               ; buffer for i2c bus
+                        .blkb   64
+i2c_buffer::            .blkb   64              ; buffer for i2c bus
 
 time_buffer::           .blkb   6               ; buffer for real time clock
 

@@ -209,10 +209,14 @@
 ;************************
 .macro i2c op,slave,addr,lenght
    pushuw rr0
+   clr     EIPR
+   pushu   EIMR
+   clr     EIMR
+   ld    SLAVE_STAT,#SLAVE_READY
    ld    SLAVE_OP,#op
    ld    SLAVE_W,#slave
    ldw   rr0,addr
-   ld    LENGHT,lenght
+   ldw   LENGHT,lenght
 ;   ifw [rr0 > #255]                 
 ;   {                                     
 ;      and   r0,#00000111b
@@ -221,6 +225,10 @@
 ;   }
    ld    SLAVE_ADDR,r1
    call  i2c_bus
+   waitbit SLAVE_STAT,#SLAVE_READY
+   clr     EIPR
+   nop
+   popu    EIMR
    popuw   rr0
 .endm
 ;************************
