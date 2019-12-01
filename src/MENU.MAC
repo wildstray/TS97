@@ -1,29 +1,48 @@
 ;****************************************************************************
 ;**************************** macro list ************************************
 ;****************************************************************************
-;* print                where,msg       ; visualizza il messaggio msg
+;* blank                where           ; riempe la linea di spazi
+;* print                where,msg,msg2  ; visualizza il messaggio msg
 ;* .menu                maxmenu         ; make a selection menu (of maxmenu)
 ;* .display             num,text1,text2 ; display the menu number num
 ;* .action    todo }    num             ; if confirmed execute 
 ;* .back                                ; backward instead forward key
 ;* .endmenu                             ; current menu termination
-;* .input               buffer,begin,end; user input beetwen begin and end
+;* .input               begin,end,backch; user input beetwen begin and end
 ;* .maxval              pos,val,prec    ;
+;* .minval              pos,val,prec    ;
 ;* .break               pos,char        ; put a break char in pos
 ;* .endinput                            ; end of user input
 ;****************************************************************************
 
 ;************************
-.macro  print  where,message
+.macro  blank  where
+   ldw     rr6,#where
+   ld      r3,#16
+   ld      r8,#32
+   loop [r3]
+   {
+      ld      (rr6)+,r8
+   }
+.endm
+;************************
+.macro  print  where,msg1,msg2
    pushuw  rr0
    pushuw  rr2
    pushuw  rr4
    ldw     rr0,#where
-   ldw     rr2,#message
+   ldw     rr2,msg1
    ld      r4,#16
    loop [r4] {
       lddp (rr0)+,(rr2)+
    }
+   .ifc nb msg2
+   ldw     rr2,msg2
+   ld      r4,#16
+   loop [r4] {
+      lddp (rr0)+,(rr2)+
+   }
+   .endc
    popuw   rr4
    popuw   rr2
    popuw   rr0
@@ -38,7 +57,7 @@
       if [r1 == #FORWBACK]
       {
          inc      r2
-         if [r2 > #maxmenu]
+         if [r2 > maxmenu]
          {
             xor    r2,r2
          }
@@ -46,11 +65,20 @@
       .endc
 .endm
 ;************************
-.macro .display num,text1,text2
+.macro .next
+      inc      r2
+.endm
+;************************
+.macro .display num,text1,text2,calls
    if [r2 == #num]
    {
-      print line1,text1
-      print line2,text2
+      print line1,#text1
+      .ifc nb text2
+      print line2,#text2
+      .endc
+      .ifc nb calls
+      call  calls
+      .endc
    }
 .endm
 ;************************
@@ -74,7 +102,8 @@
    }
 .endm
 ;************************
-.macro .input minpos,maxpos
+.macro .input minpos,maxpos,backch
+   ld      r13,#backch
    ld      r15,#maxpos+1
    ld      r14,#minpos+1
    loop
@@ -102,6 +131,32 @@
          .endc
 .endm
 ;************************
+.macro .minval pos,val,prec
+         .ifc b prec
+         if [[r1 == #10] && [r8 == #pos]]
+         {
+            clr     r1
+         }
+         if [[r1 < #val] && [r1 < #10] && [r8 == #pos]]
+         {
+            clr     r1
+         }
+         .endc
+         .ifc nb prec
+         ld      r9,-(rr10)
+         dtmf2bcd r9,r9
+         if [[r9 <= #prec] && [r1 == #10] && [r8 == #pos]]
+         {
+            clr     r1
+         }
+         if [[r9 <= #prec] && [r1 < #val] && [r1 < #10] && [r8 == #pos]]
+         {
+           clr     r1
+         }
+         incw    rr10
+         .endc
+.endm
+;************************
 .macro .break pos,char
          if [[r1 != #0] && [r1 <= #10] && [r8 == #pos-1]]
          {
@@ -118,15 +173,22 @@
          }
          if [[r1 == #FORWBACK] && [r8 == #pos+1]]
          {
-            ld      r1,#0
-            ld      r9,#48
+            if [r13 == #32]
+            {
+               ld      r1,#0
+               ld      -(rr10),r1
+               ld      r9,r13
+            } else {
+               ld      r13,(rr10)
+               bcd2ascii r13,r9
+               decw    rr10 
+            }
             ld      (rr6),r9
             ld      r9,#char 
             ld      -(rr6),r9
             dec     r8
             ld      r9,#95
             ld      -(rr6),r9
-            ld      -(rr10),r1
             dec     r8
             clr     r1
          }
@@ -145,23 +207,29 @@
          }
          if [[r1 == #FORWBACK] && [r8 == r15]]
          {
-            ld      r1,#0
             ld      r9,#32
             ld      (rr6),r9
+            decw    rr10
             ld      r9,#95
             ld      -(rr6),r9
-            ld      -(rr10),r1
             dec     r8
             clr     r1
          }
          if [[r1 == #FORWBACK] && [r8 >= r14]] 
          {
-            ld      r1,#0
-            ld      r9,#48
+            if [r13 == #32]
+            {
+               ld      r1,#0
+               ld      -(rr10),r1
+               ld      r9,r13
+            } else {
+               ld      r13,(rr10)
+               bcd2ascii r13,r9
+               decw    rr10 
+            }
             ld      (rr6),r9
             ld      r9,#95
             ld      -(rr6),r9
-            ld      -(rr10),r1
             dec     r8
             clr     r1
          }
@@ -169,12 +237,18 @@
          {
             ld      r9,#32
             ld      (rr6),r9
-            ld      (rr10),#0
             break
          }
          if [r1 == #CONFIRM]
          {
-            ld      (rr10),#0
+            ld      r13,(rr10)
+            if [r13 == #0]
+            {
+               ld      r9,#32
+            } else {
+               bcd2ascii r13,r9
+            }
+            ld      (rr6),r9
             break
          }
       }
@@ -182,7 +256,6 @@
    }
 .endm
 ;************************
-
 
 
 

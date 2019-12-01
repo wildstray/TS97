@@ -100,15 +100,8 @@
 ;************************
 .macro  sleep   ms
 	pushuw  rr0
-   pushuw  rr2
    ldw     rr0,ms
-   loopw [rr0] {
-      ldw   rr2,#430
-      loopw [rr2] {
-         nop
-      }
-   }
-   popuw   rr2
+   call    _msleep
 	popuw   rr0
 .endm
 ;************************
@@ -194,23 +187,17 @@
 .endm
 ;************************
 .macro byte2bcd byte,bcd10,bcd1
-   pushu   r0
-   ld      r0,byte
-   ld      bcd1,r0
+   ld      bcd1,byte
    and     bcd1,#0Fh
-   ld      bcd10,r0
+   ld      bcd10,byte
    and     bcd10,#0F0h
    swap    bcd10
-   popu    r0
 .endm
 ;************************
 .macro bcd2byte bcd10,bcd1,byte
-   pushu   r0
-   ld      r0,bcd10
-   swap    r0
-   or      r0,bcd1
-   ld      byte,r0
-   popu    r0
+   ld      byte,bcd10
+   swap    byte
+   or      byte,bcd1
 .endm
 ;************************
 .macro I2C op,slave,addr,lenght
@@ -219,25 +206,12 @@
    clr     EIPR
    pushu   EIMR
    clr     EIMR
-   pushuw  rr0
    ld      SLAVE_STAT,#SLAVE_READY
    ld      SLAVE_OP,#op
    ld      SLAVE_W,#slave
-   ldw     rr0,addr
    ldw     LENGHT,lenght
-   ifw [rr0 > #255]                 
-   {                                     
-      and     r0,#00000111b
-      rol     r0
-      or      SLAVE_W,r0
-   }
-   ld      SLAVE_ADDR,r1
-   call    i2c_transfer
-   waitbit SLAVE_STAT,#SLAVE_READY
-   delay   #2300
-   popuw   rr0
-;   clr     EIPR
-;   nop
+   ldw     SLAVE_ABS,addr
+   call    _i2c_transfer
    popu    EIMR
    popu    PPR
 .endm
@@ -271,5 +245,21 @@
    ld      address(rr2),r0
    popuw   rr2
    popuw   rr0
+.endm
+;************************
+.macro dtmf2bcd dtmf,bcd
+   ld      bcd,dtmf
+   if [dtmf == #10]
+   {
+      ld      bcd,#0
+   }
+.endm
+;************************
+.macro bcd2dtmf bcd,dtmf
+   ld      bcd,dtmf
+   if [bcd == #0]
+   {
+      ld      dtmf,#10
+   }
 .endm
 ;************************
