@@ -42,7 +42,7 @@
 .include    "\st9\include\page_0.inc"    ; Page 0 register
 .include    "\st9\include\io_port.inc"   ; I/O port register
 .include    "\st9\include\mftimer.inc"   ; MF Timer register
-;.include    "\st9\include\ad_c.inc"      ; A/D converter register
+.include    "\st9\include\ad_c.inc"      ; A/D converter register
 .include    "\st9\include\sci.inc"       ; SCI register
 .include    "\st9\include\bitmacro.inc"  ; BIT macros
 .list
@@ -74,10 +74,47 @@ START           = 100h                  ; Start of C startup code
 ROMDATA         = 3000h                 ; Static data start
 ROMSIZE         = 4000h                 ; ROM size
 
-REMOTE_TEST     = 0101010001010000b     ; Test pattern for remote
-
+;***************************************
+;***************** constants declaration
+;***************************************
 on              = 1             
 off             = 0            
+
+E2_SLAVE     == 10100000b           ; EEPROM control byte
+RTC_SLAVE    == 11010000b           ; Real Time Clock control byte
+
+READ         == 1                   ; Read mode
+WRITE        == 2                   ; Write mode
+VERIFY       == 3                   ; Alternate read mode
+
+TRANS_CTRL   == 1                   ; The slave control transferred
+TRANS_ADDR   == 2                   ; The slave address transferred
+TRANS_DWR    == 3                   ; The data has been transmitted
+TRANS_DRD    == 4                   ; The data has been received
+
+READING      == 1                   ; Slave is reading a byte.
+VERIFYING    == 2                   ; Slave is reading the current byte.
+WRITING      == 3                   ; Slave is programming a byte.
+NO_ACK       == 4                   ; Slave has not acknowledged.
+
+SLAVE_READY  == 80h                 ; Slave is ready for a new operation...
+
+
+DTMFAVLB        = 00000100b
+DTMFINOUT       = 00000101b
+DTMFTONE        = 00000110b
+TONEHIZ         = 0
+TONEDIAL        = 1
+TONEPBX         = 2
+TONEBUSY        = 3
+
+E2_CHECKSUM     = 0
+E2_SERIAL       = 2
+E2_REMOTE       = 6
+E2_NUMERS       = 480
+E2_EVENTS       = 608
+E2_SIZE         = 2048
+
 
 ;***************************************
 ;********************* I/O ports equates
@@ -119,17 +156,9 @@ MUTE            = 00000001b
 REL1            = 00000010b
 REL2            = 00000100b
 RING            = 00001000b
-VOICE_CUE       = 00010000b
-VOICE_ADDR      = 00100000b
+CUE             = 00010000b
+CONT            = 00100000b
 
-;** MT8880 EQUATES
-DTMFAVLB        = 00000100b
-DTMFINOUT       = 00000101b
-DTMFTONE        = 00000110b
-TONEHIZ         = 0
-TONEDIAL        = 1
-TONEPBX         = 2
-TONEBUSY        = 3
 
 
 ;**************************************************************************
@@ -178,7 +207,7 @@ TONEBUSY        = 3
 ;******* Bank 8             
 ;**************
 DISP_C  := R142                         ; 
-DISP_F  := R141                         ; 
+DISP_F  := R141                         ;
 RTCFLAG := R140                         ;
 ;       := R139                         ;
 SWITCH  := R138                         ;  
@@ -251,8 +280,8 @@ SPI_STAT   :=  R68                      ; SPI transfer status.
 SLAVE_STAT :=  R67                      ; Slave status.
 SLAVE_OP   :=  R66                      ; Operation to do by the slave.
 SLAVE_ADDR :=  R65                      ; Address in the slave memory.
-BUFFER     :=  R64                      ; Temporary data to been transferred.
-buffer     :=  r0
+TEMP       :=  R64                      ; Temporary data.
+temp       :=  r0
 
 
 ;**************
@@ -294,30 +323,6 @@ buffer     :=  r0
 ;       :=RR20
 ;       :=RR18
 ;       :=RR16
-
-
-;***********************
-; Constant declarations.
-;***********************
-
-E2_SLAVE     == 10100000b           ; EEPROM I2C slave control byte
-RTC_SLAVE    == 11010000b           ; Real Time + I2C slave control byte
-
-READ         == 1                   ; Read mode
-WRITE        == 2                   ; Write mode
-VERIFY       == 3                   ; Alternate read mode
-
-TRANS_CTRL   == 1                   ; The slave control transferred
-TRANS_ADDR   == 2                   ; The slave address transferred
-TRANS_DWR    == 3                   ; The data has been transmitted
-TRANS_DRD    == 4                   ; The data has been received
-
-READING      == 1                   ; Slave is reading a byte.
-VERIFYING    == 2                   ; Slave is reading the current byte.
-WRITING      == 3                   ; Slave is programming a byte.
-NO_ACK       == 4                   ; Slave has not acknowledged.
-
-SLAVE_READY  == 80h                 ; Slave is ready for a new operation...
 
 
 
@@ -409,31 +414,31 @@ st9$entry_GO::                                  ;
     ld      p2c2r,#11011110b                ;\
     ld      p2c1r,#01111100b                ; | Set port 2
     ld      p2c0r,#11011111b                ;/
-;   ld      p2dr, #00000000b
+;   ld      P2DR, #00000000b
    ;emulator board  ^     ^
 	;***********************
    spp     #P3C_PG                         ; Port 3 page
    ld      p3c2r,#11111111b                ;\ 
    ld      p3c1r,#00000000b                ; | Set port 3
-	ld      p3c0r,#11111111b                ;/
+   ld      p3c0r,#11111111b                ;/
    ;***********************
    spp     #P4C_PG                         ; Port 4 page
 	ld      p4c2r,#00000000b                ;\ 
 	ld      p4c1r,#11110000b                ; | Set port 4
 	ld      p4c0r,#00000000b                ;/
-   ld      p4dr ,#00000000b                ;
+   ld      P4DR ,#00000000b                ;
 	;***********************
    spp     #P5C_PG                         ; Port 5 page
    ld      p5c2r,#00001000b                ;\
 	ld      p5c1r,#11110111b                ; | Set port 5
    ld      p5c0r,#00000000b                ;/
-   ld      p5dr ,#00000000b                ;
+   ld      P5DR ,#00000000b                ;
 	;***********************
    spp     #P7C_PG                         ; Port 7 page
 	ld      p7c2r,#00100001b                ;\
 	ld      p7c1r,#11011110b                ; | Set port 7
 	ld      p7c0r,#00100011b                ;/
-   ld      p7dr ,#00111111b                ;
+   ld      P7DR ,#00111111b                ;
    ;***********************
 
 
@@ -512,12 +517,12 @@ init::
 
 	call    display_init
 	call    _8880_init
+   call    _1420_init
 
    clr     EIPR
 ;   nop
 
    ei
-;jx i2c_test
 
 diagnose::
    print   line1, message_diag
@@ -538,8 +543,6 @@ diagnose::
    }
    sleep   #1000
 
-   call    clock_start
-
    call    rtc_check
    if [r0 == #1]
    {
@@ -551,12 +554,16 @@ diagnose::
 
    call    display_bufclr
 
+   call    clock_start
+
+   I2C READ,E2_SLAVE,#E2_REMOTE,#2
+   ldw     rr0,#remote_buffer
+   ldw     rr2,#i2c_buffer
+   lddd    (rr0)+,(rr2)+
+   lddd    (rr0)+,(rr2)+
 
 ;   jx tony
 ;   jx pino
-
-;   and     P5DR ,#~00110001b
-;   or      P5DR ,#00000001b
 
 idle::
    spp     #0
@@ -590,7 +597,7 @@ main::
          jx       hook
       }
       ldw    rr0,(frame_buffer)
-      ifw [rr0 == #REMOTE_TEST]
+      ifw [[rr0 == (remote_buffer)] && [rr0 != #0]]
       {
          print    line2, message_alrem
          jx       allarme
@@ -622,7 +629,7 @@ allarme::
 ;   sleep   #1000
 
    ldw     rr0,#combtel_buffer
-   ldw     rr2,#numero
+   ldw     rr2,#number
    ld      r4,#32
    loop [r4] {
       lddd (rr0)+,(rr2)+
@@ -664,11 +671,11 @@ allarme::
 ;      ld      r4,#6
       ld      DIGIT,#0
       while [DIGIT != #5] {
-         call    reset_message
+         call    _1420_reset
          sleep   #100
-         call    play_begin
+         call    _1420_play
          sleep   #5000
-         call    play_end
+         call    _1420_stop
          ifbit SWITCH, #RESET
             jx       annullamento
          }
@@ -717,15 +724,18 @@ hook::
 
 
 progr::
-
    _8880_ei
    and     EIMR,#~11110000b
    and     EIPR,#00001111b
 
    print   line1, message_progst
    print   line2, message_tastibegin
+   
    relay1  on
    relay2  on
+
+   sleep   #1000
+
 
    ld      r0,#1001b
    call    _8880_ctrl_wr
@@ -760,14 +770,14 @@ progr::
       if [r1 == #11]
       {
          inc      r2
-         if [r2 > #6]
+         if [r2 > #5]
          {
            xor    r2,r2
          }
       }
       if [r1 == #12]
       {
-         call  prog_menu 
+         call  main_menu 
       }
       print   line2, message_tastipr
       switch [r2]
@@ -776,13 +786,13 @@ progr::
             print   line1, menu_oradata
          case #1:
             print   line1, menu_messaggi
-         case #3:
+         case #2:
             print   line1, menu_numeri
-         case #4:
+         case #3:
             print   line1, menu_telecomando
-         case #5:
+         case #4:
             print   line1, menu_tempi
-         case #6:
+         case #5:
             print   line1, menu_riservato
       }
 ;      if [PHONE == #0]
@@ -797,13 +807,16 @@ progr::
       }
       clr     r1
    }
+   relay1  off
+   relay2  off
    print   line1, message_fineprog1
    print   line2, message_fineprog2
    sleep   #1000
    jx      idle
 
 
-prog_menu::
+proc main_menu [r1,r2]
+{
    loop {
       ld      r1,DIGIT
       clr     DIGIT
@@ -813,18 +826,18 @@ prog_menu::
             print   line1, sub_oradata1
             print   line2, sub_oradata2
          case #1:
-            print   line1, sub_messaggi1
-            print   line2, sub_messaggi2
+            call    menu_messages
+            break
+         case #2:
+            call    menu_numbers
+            break
          case #3:
-            print   line1, sub_numeri1
-            print   line2, sub_numeri2
+            call    menu_remote
+            break
          case #4:
-            print   line1, sub_telecomando1
-            print   line2, sub_telecomando2
-         case #5:
             print   line1, sub_tempi1
             print   line2, sub_tempi2
-         case #6:
+         case #5:
             print   line1, sub_riservato1
             print   line2, sub_riservato2
       }
@@ -837,129 +850,213 @@ prog_menu::
          switch [r2]
          {
             case #1:
-               call   prog_messaggi
-            case #3:
-               call   prog_numeri
+               call   menu_messages
          }
       }
-      clr     r1
-;      if [PHONE == #0]
-;      {
-;         break
-;      }
-;      ifbit SWITCH, #RESET
-;         break
-;      }
       ifnobit SWITCH, #PROG
          break
       }
+      clr     r1
    }
-   ret
+}
 
-prog_messaggi::
-;   loop {
-;      ld      r1,DIGIT
-;      clr     DIGIT
-;      ifbit P3DR,#PROG
-;         while [] {
-;
-;         }
-;       if [DIGIT == #10]
-;       {
-         print   line1, messaggi_begin1
-         print   line2, messaggi_begin2
-
-         call  reset_message
-         sleep #100
-         call  rec_begin
-         sleep #5000
-         call  rec_end
-
-         print   line1, messaggi_end1
-         print   line2, messaggi_end2
-         sleep   #1000
-
-;         break
-;      }
-;      clr     r1
-;      if [r1 == #11]
-;      {
-;         break
-;      }
-;      if [PHONE == #0]
-;      {
-;         break
-;      }
-;   }
-   ret
-
-prog_numeri::
-   call    display_bufclr
-   print   line1, numeri_begin1
-   ld      r8,#0
-   ldw     rr6,#line2
-   ldw     rr10,#numero
-   ld      (rr10),#0
-
-   zero  numero,#16
-
+proc menu_remote [r1,r2]
+{
+   ld      r2,#0
+   ld      r0,#1
    loop {
       ld      r1,DIGIT
       clr     DIGIT
-
-      if [r1 != #0]
+      if [r1 == #11]
       {
-         bcd2ascii  r1,r9
-         if [[r8 <= #15] && [r1 <= #10]]
+         inc      r2
+         if [r2 > #2]
          {
-           ld      (rr6)+,r9
-           ld      (rr10)+,r1
-           inc     r8
+           xor    r2,r2
          }
       }
-      if [[r1 == #11] && [r8 >= #0]]
+      switch [r2]
       {
-         ld      r1,#0
-         ld      r9,#32 
-         ld      -(rr6),r9
-         ld      -(rr10),r1
-         dec     r8
+         case #0:
+               print   line1, sub_remote1
+               print   line2, sub_remote2
+         case #1:
+               print   line1, sub_remcode1
+               print   line2, sub_remcode2
+         case #2:
+               print   line1, menu_preced1
+               print   line2, menu_preced2
       }
       if [r1 == #12]
       {
-         ld     (rr10),#0
+         switch [r2]
+         {
+            case #0:
+               print   line1, sub_remhit1
+               print   line2, sub_remhit2
+               ldw     rr2,#frame_buffer
+               ldw     (rr2),#0
+               ldw     rr8,#200
+               remote_ei
+               loopw [rr8]
+               {
+                  sleep   #100
+                  ldw     rr2,(frame_buffer)
+                  ifw [rr2 != #0]
+                  {
+                     break
+                  }
+                  ifnobit SWITCH, #PROG
+                     break
+                  }
+               }
+               remote_di
+               ifw [rr2 == #0]
+               {
+                  print   line1, sub_remfail1
+                  print   line2, sub_remfail2
+                  sleep   #1000
+               } else {
+                  ldw     rr2,#i2c_buffer
+                  ldw     rr4,#frame_buffer
+                  lddd    (rr2)+,(rr4)+
+                  lddd    (rr2)+,(rr4)+
+                  I2C WRITE,E2_SLAVE,#E2_REMOTE,#2
+                  print   line1, sub_remok1
+                  print   line2, sub_remok2
+                  sleep   #1000
+               }
+            case #1:
+            case #2:
+               break
+         }
+      }
+      ifnobit SWITCH, #PROG
          break
       }
       clr     r1
    }
-   if [(numero) != #0]
-   {
-     zero  i2c_buffer,#8
-     ldw     rr6,#0
-     ldw     rr4,#0
-     loop [r8]
-     {
-        ld      r1,numero(rr4)
-        incw    rr4
-        ld      r2,numero(rr4)
-        incw    rr4
-        bcd2byte r1,r2,r3
-        ld      i2c_buffer(rr6),r3
-        incw    rr6
-        if [[r1 == #0] || [r2 == #0]]
-        {
-           break
-        }
-     }
-     zeppillo::
-     I2C WRITE, E2_SLAVE, #0, #8
+}
+
+
+proc menu_messages [r1,r2]
+{
+   ld      r2,#0
+   ld      r0,#1
+   loop {
+      ld      r1,DIGIT
+      clr     DIGIT
+      if [r1 == #11]
+      {
+         inc      r2
+         if [r2 > #2]
+         {
+           xor    r2,r2
+         }
+      }
+      switch [r2]
+      {
+         case #0:
+               print   line1, messaggi_record1
+               print   line2, messaggi_record2
+         case #1:
+               print   line1, messaggi_play1
+               print   line2, messaggi_play2
+         case #2:
+               print   line1, menu_preced1
+               print   line2, menu_preced2
+      }
+      if [r1 == #12]
+      {
+         switch [r2]
+         {
+            case #0:
+               call    _1420_reset
+               sleep   #200
+               print   line1, sub_record1
+               print   line2, sub_record2
+               call    _1420_record
+               sleep   #5000
+               call    _1420_stop
+               print   line1, sub_recend1
+               print   line2, sub_recend2
+               sleep   #1000
+            case #1:
+               call    _1420_reset
+               sleep   #200
+               print   line1, sub_play1
+               print   line2, sub_play2
+               call    _1420_play
+               sleep   #5000
+               call    _1420_stop
+               print   line1, sub_playend1
+               print   line2, sub_playend2
+            case #2:
+               break
+         }
+      }
+      ifnobit SWITCH, #PROG
+         break
+      }
+      clr     r1
    }
-   ret
+}
+
+proc menu_numbers [r1]
+{
+   ld      r2,#0
+   ld      r0,#1
+   loop {
+      ld      r1,DIGIT
+      clr     DIGIT
+      if [r1 == #11]
+      {
+         inc      r2
+         if [r2 > #8]
+         {
+           xor    r2,r2
+         }
+      }
+      if [[r1 == #12] && [r2 == #8]]
+      {
+         break
+      }
+      if [r2 == #8]
+      {
+         print   line1,menu_preced1
+         print   line2,menu_preced2
+      }
+      if [r1 == #12]
+      {
+         call    number_enter
+      }
+      if [[r2 < #8] && [r2 != r0]]
+      {
+         ld      r0,r2
+         call    number_read
+         call    number_show
+      }
+      ifnobit SWITCH, #PROG
+         break
+      }
+      clr     r1
+   }
+}
 
 
 
-
-
+;*************************************************************************
+;*************************************************************************
+;*************************************************************************
+;*************************************************************************
+;*************************************************************************
+;*************************************************************************
+;*************************************************************************
+;*************************************************************************
+;*************************************************************************
+;*************************************************************************
+;*************************************************************************
+;*************************************************************************
 ;*************************************************************************
 ;*************************************************************************
 ;*************************************************************************
@@ -1146,19 +1243,19 @@ peppo::
 	      case #10:
             ld      r4,#48
             ld      (rr6)+,r4
-            call    reset_message
+            call    _1420_reset
 	      case #11:
             ld      r4,#00101010b
             ld      (rr6)+,r4
-            call    rec_begin
+            call    _1420_record
             sleep   #5000
-            call    rec_end
-	      case #12:
+            call    _1420_stop
+         case #12:
             ld      r4,#00100011b
             ld      (rr6)+,r4
-            call    play_begin
+            call    _1420_play
             sleep   #5000
-            call    play_end
+            call    _1420_stop
 	      default:
             ld      r4,#48
             add     r4,r2
@@ -1242,7 +1339,7 @@ i2c_test::
      pushu EIMR
 
      ldw     rr6,#i2c_buffer
-     ldw     rr10,#num2
+     ldw     rr10,#number
      ld      r8,#4
      loop [r8] {
         lddp (rr6)+,(rr10)+
@@ -1410,9 +1507,8 @@ _A0_int::
    ;clr     EIPR                            ; clear pending interrupts
    ;nop
    ;pushu   EIMR
-   ;clr     EIMR                            ; disable all interrupts
-   and     EIPR,#~ipa0m
-
+   ;clr     EIMR                       
+   and     EIPR,#~ipa0m                    ; clear pending bit
    ;***********************
    call    display_update                  ; resfresh display
 	;***********************
@@ -1479,20 +1575,17 @@ _A1_int::
    srp     #(3*2)
    spp     #0
    and     EIPR,#~ipa1m
-
-   delay   #8000
+   delay   #1000
    call    _8880_ctrl_rd
    ifbit   r0,#0101b
-      delay   #8000
       call    _8880_data_rd
       ld      DIGIT,r0
 	}
-   delay   #8000
+   delay   #1000
    ld      r0,#1100b
 	call    _8880_ctrl_wr
    ld      r0,#0000b
 	call    _8880_ctrl_wr
-
    popuw   RPP
    popu    PPR
 	iret
@@ -1508,12 +1601,9 @@ _B0_int::
    spp     #0
    if [SPI_STAT == #TRANS_DRD]
    {
-      ld    buffer,SPIDR         
-;      ld    i2c_buffer(lenght),buffer
-
-      ld    i2c_buffer(counter),buffer
+      ld    temp,SPIDR         
+      ld    i2c_buffer(counter),temp
       incw  counter
-
       decw  lenght
       if    [SETZ]
       {
@@ -1523,7 +1613,7 @@ _B0_int::
          call  GEN_ACK 
          ld    SPI_STAT,#TRANS_DRD
          spp   #0
-         ld    buffer,#0FFH 
+         ld    temp,#0FFH 
       } 
 	} else {
       call  TEST_ACK          
@@ -1538,35 +1628,31 @@ _B0_int::
             {
                ld    SPI_STAT,#TRANS_DRD
                spp   #0
-               ld    buffer,#0FFH 
+               ld    temp,#0FFH 
 				} else {
                ld    SPI_STAT,#TRANS_ADDR
 					spp	#0
-               ld    buffer,SLAVE_ADDR
+               ld    temp,SLAVE_ADDR
             }
          case  #TRANS_ADDR:
             if [SLAVE_OP == #READ]
             {
                call  GEN_START   
                ld    SPI_STAT,#TRANS_CTRL
-               ld    buffer,SLAVE_R
+               ld    temp,SLAVE_R
                ld    SLAVE_STAT,#VERIFYING  
 				} else {
 					spp	#0
                ld    SPI_STAT,#TRANS_DWR
-;               ld    buffer,i2c_buffer(lenght)
-               ld    buffer,i2c_buffer(counter)
+               ld    temp,i2c_buffer(counter)
             } 
          case  #TRANS_DWR:
 				spp	#0
-
             incw  counter
-   
             decw  lenght  
             if    [CLZ]
             {
-;               ld    buffer,i2c_buffer(lenght)
-               ld    buffer,i2c_buffer(counter)
+               ld    temp,i2c_buffer(counter)
             } else {  
                call  GEN_STOP
                or    SLAVE_STAT,#SLAVE_READY   
@@ -1574,7 +1660,7 @@ _B0_int::
          }
       }
    } 
-   ld    SPIDR,buffer
+   ld    SPIDR,temp
 	popuw	RPP
 	popu	PPR
 	iret
@@ -2024,85 +2110,47 @@ proc mute_off [PPR]
 ;**************************************************************************
 ;****************** Sezione messaggistica vocale **************************
 ;**************************************************************************
-cue_message::
-	pushuw     rr0
-	set_bit    P5DR,VOICE_CUE
-   sleep      #100
-	clr_bit    P5DR,VOICE_CUE
-	popuw      rr0
-	ret
+proc _1420_init [PPR]
+{
+   and     P5DR ,#~(CUE | CONT)
+;   or      P5DR ,#(CUE | CONT)
+}
 
-reset_message::
-	pushuw     rr0
-	clr_bit    P5DR,VOICE_ADDR
-   sleep      #100
-	set_bit    P5DR,VOICE_ADDR
-	popuw      rr0
-	ret
+proc _1420_cue [PPR]
+{
+   and         P5DR,#~CUE
+   sleep       #100
+   or          P5DR,#CUE
+}
 
+proc _1420_reset [PPR]
+{
+   and         P5DR,#~CONT
+   sleep       #100
+   or          P5DR,#CONT
+}
 
-rec_begin::
-	pushu   PPR
-	spp     #P7D_PG
-;   pushuw     rr0
-	clr_bit    P7DR,RECN
-;   ldw        rr0,#40
-;   loopw [rr0] {
-;      sleep      #60
-;   }
-;   set_bit    P7DR,RECN
-;  sleep      #60
-;  waitnobit  P7DR,#RECLEDN
-;   popuw      rr0
-	popu    PPR
-	ret
+proc _1420_record [PPR]
+{
+   spp         #P7D_PG
+   and         P7DR,#~RECN
+   sleep       #100
+}
 
-rec_end::
-	pushu   PPR
-	spp     #P7D_PG
-;   pushuw     rr0
-;   clr_bit    P7DR,RECN
-;   ldw        rr0,#40
-;   loopw [rr0] {
-;      sleep      #60
-;   }
-	set_bit    P7DR,RECN
-;  sleep      #60
-;  waitnobit  P7DR,#RECLEDN
-;   popuw      rr0
-	popu    PPR
-	ret
+proc _1420_play [PPR]
+{
+   spp         #P7D_PG
+   and         P7DR,#~PLAYLN
+   sleep       #100
+}
 
+proc _1420_stop [PPR]
+{
+   spp         #P7D_PG
+   or          P7DR,#(RECN | PLAYLN)
+   sleep       #100
+}
 
-play_begin::
-	pushu   PPR
-	spp     #P7D_PG
-;   pushuw     rr0
-	clr_bit    P7DR,PLAYLN
-;   ldw        rr0,#30
-;   loopw [rr0] {
-;      sleep      #60
-;   }
-;   set_bit    P7DR,PLAYLN
-;  sleep      #60
-	popuw      rr0
-	popu    PPR
-	ret
-
-play_end::
-	pushu   PPR
-	spp     #P7D_PG
-;   pushuw     rr0
-;   clr_bit    P7DR,PLAYLN
-;   ldw        rr0,#30
-;   loopw [rr0] {
-;      sleep      #60
-;   }
-	set_bit    P7DR,PLAYLN
-;  sleep      #60
-;   popuw      rr0
-	popu    PPR
-	ret
 
 ;**************************************************************************
 ;************************ Toni linea telefonica ***************************
@@ -2279,7 +2327,6 @@ proc GEN_START [PPR]
 {
    spp      #0                         ; SPI and ext. ints. in page 0.
    and      SPICR,#~spen               ; Disable SPI -> SDA, SCK in HZ
-;   ld       SPICR,#(bms | SPI_128)    ; Disable SPI -> SDA, SCK in HZ
    and      P2DR,#~SDO                 ; Prepare "0" on output buffer of SDO.
    spp      #P2C_PG
    and      P2C0R,#~SDO                ; SDO line in output -> SDA line = "0".
@@ -2383,7 +2430,7 @@ proc clock_start [r0,r1,r2,r3]
 ;   }
 }
 
-proc clock_menu [r0,r1,r2,r3]
+proc clock_enter [r0,r1,r2,r3]
 {
 }
 
@@ -2404,6 +2451,166 @@ proc rtc_check [r1,r2,r3]
 {
 }
 
+proc number_read [r1,r2]
+{
+   zero    number,#16
+   ldw     rr2,#8
+   mul     rr2,r0
+   addw    rr2,#E2_NUMERS
+   I2C READ, E2_SLAVE, rr2, #8
+   if [(i2c_buffer) != #0]
+   {
+     ldw     rr12,#0
+     ldw     rr4,#0
+     loop 
+     {
+        ld      r3,i2c_buffer(rr12)
+        incw    rr12
+        byte2bcd r3,r1,r2
+        ld      number(rr4),r1
+        incw    rr4
+        ld      number(rr4),r2
+        incw    rr4
+        if [[r1 == #0] || [r2 == #0]]
+        {
+           break
+        }
+     }
+   }
+}
+
+proc number_write [r1,r2]
+{
+   zero    i2c_buffer,#8
+   ldw     rr6,#0
+   ldw     rr4,#0
+   loop [r8]
+   {
+      ld      r1,number(rr4)
+      incw    rr4
+      ld      r2,number(rr4)
+      incw    rr4
+      bcd2byte r1,r2,r3
+      ld      i2c_buffer(rr6),r3
+      incw    rr6
+      if [[r1 == #0] || [r2 == #0]]
+      {
+         break
+      }
+   }
+   ldw     rr2,#8
+   mul     rr2,r0
+   addw    rr2,#E2_NUMERS
+   I2C WRITE, E2_SLAVE, rr2, #8
+}
+
+proc number_show [r0,r1]
+{
+   call    display_bufclr
+   print   line1, numeri_begin
+   ldw     rr4,#15
+   loopw [rr4] {
+      ld      r1,line1(rr4)
+      if [r1 == #23h]
+      {
+         ld    r1,r0
+         inc   r1
+         bcd2ascii r1,r1
+         ld    line1(rr4),r1
+      }
+   }
+   ldw     rr6,#line2
+   ldw     rr10,#number
+   loop 
+   {
+      ld      r1,(rr10)+
+      bcd2ascii r1,r9
+      ld      (rr6)+,r9
+      if [r1 == #0]
+      {
+         ld      r9,#32
+         ld      -(rr6),r9
+         break
+      }
+   }
+}
+
+proc number_enter [r0,r1]
+{
+   call    number_read
+   call    display_bufclr
+   print   line1, numeri_begin
+   ldw     rr4,#15
+   loopw [rr4] {
+      ld      r1,line1(rr4)
+      if [r1 == #23h]
+      {
+         ld    r1,r0
+         inc   r1
+         bcd2ascii r1,r1
+         ld    line1(rr4),r1
+      }
+   }
+   ld      r8,#0
+   ldw     rr6,#line2
+   ldw     rr10,#number
+   if [(number) != #0]
+   {
+      loop
+      {
+         ld      r1,(rr10)+
+         bcd2ascii r1,r9
+         ld      (rr6)+,r9
+         inc     r8
+         if [r1 == #0]
+         {
+            ld      r9,#95
+            ld      -(rr6),r9
+            ld      -(rr10),r1
+            dec     r8
+            break
+         }
+      }
+   } else {
+      ld      r1,#95
+      ld      (rr6),r1
+   }
+   loop {
+      ld      r1,DIGIT
+      clr     DIGIT
+      if [r1 != #0]
+      {
+         bcd2ascii  r1,r9
+         if [[r8 <= #15] && [r1 <= #10]]
+         {
+           ld      (rr6)+,r9
+           ld      (rr10)+,r1
+           ld      r9,#95
+           ld      (rr6),r9
+           inc     r8
+         }
+      }
+      if [[r1 == #11] && [r8 >= #0]]
+      {
+         ld      r1,#0
+         ld      r9,#32
+         ld      (rr6),r9
+         ld      r9,#95
+         ld      -(rr6),r9
+         ld      -(rr10),r1
+         dec     r8
+      }
+      if [r1 == #12]
+      {
+         ld      r9,#32
+         ld      (rr6),r9
+         ld      (rr10),#0
+         break
+      }
+      clr     r1
+   }
+   call    number_write
+}
 
 ;**************************************************************************
 ;************************** Dati statici in rom ***************************
@@ -2461,21 +2668,45 @@ menu_tempi::            .asciz  "    Tempi     ~"
 menu_riservato::        .asciz  "  Riservato    "
 sub_oradata1::          .asciz  "Non disponibile!"
 sub_oradata2::          .asciz  " *             "
-sub_messaggi1::         .asciz  "Nuovo messaggio "
-sub_messaggi2::         .asciz  " *  # Registra "
-sub_numeri1::           .asciz  "  Numeri Tel. ~"
+
+messaggi_record1::      .asciz  "Nuovo messaggio~"
+messaggi_record2::      .asciz  " *~  # Registra "
+messaggi_play1::        .asciz  "Controlla mess.~"
+messaggi_play2::        .asciz  " *~  # Riascolta"
+sub_record1::           .asciz  "  Parlare nel   "
+sub_record2::           .asciz  " microfono....  "
+sub_recend1::           .asciz  "   Messaggio    "
+sub_recend2::           .asciz  "  registrato.   "
+sub_play1::             .asciz  "   Ascoltare    "
+sub_play2::             .asciz  " il messaggio..."
+sub_playend1::          .asciz  "     Fine       "
+sub_playend2::          .asciz  "   messaggio.   "
+messaggi_alarm::        .asciz  "Mess. Allarme #~"
+
+sub_numeri1::           .asciz  "   Numeri Tel.  "
 sub_numeri2::           .asciz  " *  # Conferma "
-sub_telecomando1::      .asciz  " Telecomando  ~"
-sub_telecomando2::      .asciz  " *             "
+
+sub_remote1::           .asciz  "Aquisisci nuovo~"
+sub_remote2::           .asciz  " *  # Conferma "
+sub_remcode1::          .asciz  "Conferma codice~"
+sub_remcode2::          .asciz  "  ############  "
+sub_remhit1::           .asciz  "Premere il tasto"
+sub_remhit2::           .asciz  "del telecomando!"
+sub_remok1::            .asciz  "Codice aquisito "
+sub_remok2::            .asciz  "                "
+sub_remfail1::          .asciz  "  Telecomando   "
+sub_remfail2::          .asciz  " NON AQUISITO!  "
+
 sub_tempi1::            .asciz  "    Tempi     ~"
 sub_tempi2::            .asciz  " *             "
 sub_riservato1::        .asciz  "  Riservato    "
 sub_riservato2::        .asciz  " *             "
-messaggi_begin1::       .asciz  "  Parlare nel   "
-messaggi_begin2::       .asciz  " microfono....  "
-messaggi_end1::         .asciz  "   Messaggio    "
-messaggi_end2::         .asciz  "  registrato.   "
-numeri_begin1::         .asciz  "  1o Numero:    "
+numeri_begin::          .asciz  "   Numero  #:   "
+numeri_absent::         .asciz  "Non programmato!"
+menu_preced1::          .asciz  "   Ritorna al   "
+menu_preced2::          .asciz  "menu precedente."
+menu_pbxdelay1::        .asciz  "Ritardo dopo lo "
+menu_pbxdelay2::        .asciz  "zero per PBX: ##"
 
 message_cornetta::      .asciz  "Cornetta telef. "
 message_abbassata::     .asciz  "   ABBASSATA    "
@@ -2491,15 +2722,16 @@ msglibero::             .asciz  "     LIBERA     "
 msgpbx::                .asciz  "   PBX LIBERO   "
 msghiz::                .asciz  " ALTA IMPEDENZA "
 
-;numero::               .byte   10,3,3,8,8,2,8,2,8,1,1,0
-;numero::               .byte   10,3,3,6,4,6,10,1,8,5,0
 
-;numero::               .byte   1,1,0
-num2::                  .byte   1,2,3,4
+;**************************************************************************
+;************************* Fine ROM - Checksum ****************************
+;**************************************************************************
 
-                        .org    (ROMSIZE - 4)
+                        .org    (ROMSIZE - 8)
 pattern::               .byte   055h,0AAh
+serial::                .byte   1,0,0,2
 checksum::              .byte   0,0
+
 
 ;**************************************************************************
 ;****************** Definizione dei dati dinamici in RAM ******************
@@ -2517,11 +2749,12 @@ line1::                 .blkb   16              ; display buffer of 32 char
 line2::                 .blkb   16
 
 frame_buffer::          .blkb   2               ; format: 0xxxxxx00xxxxxx0
+remote_buffer::         .blkb   2               ; format: 0xxxxxx00xxxxxx0
 
-combtel_buffer::        .blkb   32              ; buffer of 32 numbers
+combtel_buffer::        .blkb   16              ; buffer of 16 numbers
 
 i2c_buffer::            .blkb   8               ; buffer for i2c bus
 
 time_buffer::           .blkb   3               ; buffer for real time clock
 
-numero::                .blkb   16      
+number::                .blkb   16              ; current telefonic number

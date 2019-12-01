@@ -149,11 +149,11 @@
 .macro   relay1 status
    pushu r0
    ld    r0,#status
-   if [r0 == #0]
+   if [r0 == off]
    {
-      and     P2DR,#~REL1
+      and     P5DR,#~REL1
    } else {
-      or      P2DR,#REL1
+      or      P5DR,#REL1
    }
    popu  r0
 .endm
@@ -161,11 +161,11 @@
 .macro   relay2 status
    pushu r0
    ld    r0,#status
-   if [r0 == #0]
+   if [r0 == off]
    {
-      and     P2DR,#~REL2
+      and     P5DR,#~REL2
    } else {
-      or      P2DR,#REL1
+      or      P5DR,#REL2
    }
    popu  r0
 .endm
@@ -173,11 +173,11 @@
 .macro   led1 status
    pushu r0
    ld    r0,#status
-   if [r0 == #0]
+   if [r0 == off]
    {
       and     P2DR,#~LED1
    } else {
-      or      P5DR,#LED1
+      or      P2DR,#LED1
    }
    popu  r0
 .endm
@@ -185,11 +185,11 @@
 .macro   led2 status
    pushu r0
    ld    r0,#status
-   if [r0 == #0]
+   if [r0 == off]
    {
       and     P2DR,#~LED2
    } else {
-      or      P5DR,#LED2
+      or      P2DR,#LED2
    }
    popu  r0
 .endm
@@ -269,6 +269,7 @@
    {
       ld      address(rr2),r0
    }
+   ld      address(rr2),r0
    popuw   rr2
    popuw   rr0
 .endm
