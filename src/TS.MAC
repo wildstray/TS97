@@ -168,27 +168,25 @@
 .macro   MC118 status
    pushu   PPR
    P1_PAGE
-   .ifc ne status
+   .ifc eq status
       or      P1D,#PD118
    .endc
-   .ifc eq status
+   .ifc ne status
       and     P1D,#~PD118
    .endc
    popu    PPR
-   ret
 .endm
 ;************************
 .macro   MC119 status
    pushu   PPR
    P1_PAGE
-   .ifc ne status
+   .ifc eq status
       or      P1D,#PD119
    .endc
-   .ifc eq status
+   .ifc ne status
       and     P1D,#~PD119
    .endc
    popu    PPR
-   ret
 .endm
 ;************************
 .macro byte2nibble byte,nb10,nb1
